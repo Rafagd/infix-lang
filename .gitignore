@@ -1,0 +1,12 @@
+*.swp
+*.swo
+
+*.pyo
+*.pyc
+
+*.tmp
+*.bkp
+*.log
+
+*.ll
+*.s
