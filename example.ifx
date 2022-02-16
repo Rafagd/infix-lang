@@ -1,7 +1,8 @@
-null print (42 + -2);
-false if (
-    null print 43.2;
-    null print (1e10 + 2 - 3 * 4 / 2)
-);
-null print (1 * 3);
-null print "Hello, World!"
+void print "Hello, World!";
+void print "Goodbye, Silence!";
+void print 1;
+void print 1.1;
+void print true;
+void print void;
+void print null;
+void print (void print 1);
