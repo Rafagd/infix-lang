@@ -6,8 +6,6 @@
 *.tmp
 *.bkp
 *.log
-out*
-*.out
 
 # LLVM stuff
 *.ll

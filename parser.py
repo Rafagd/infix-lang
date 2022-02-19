@@ -6,6 +6,7 @@ from enum        import Enum, auto
 from tokenizer import TokenType
 
 class ExprType(Enum):
+    ANY     = auto()
     VOID    = auto()
     NULL    = auto()
     BOOLEAN = auto()
@@ -85,8 +86,8 @@ class Parser:
  
 def print_ast(node, depth=0):
     if isinstance(node, Node):
-        print(' ' * depth + str(node.operation))
+        print(' ' * depth + str(node.operation.value) + ' (' + str(node.expr_type) + ')')
         print_ast(node.left,  depth + 2)
         print_ast(node.right, depth + 2)
     else:
-        print(' ' * depth + str(node.token))
+        print(' ' * depth + str(node.token.value) + ' (' + str(node.expr_type) + ')')

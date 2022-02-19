@@ -7,20 +7,44 @@ class TypeChecker:
         ]
 
         self.ops_defs = {
-            ';':     (ExprType.VOID,    ExprType.VOID,   ExprType.VOID),
-            'print': (ExprType.VOID,    ExprType.STRING, ExprType.VOID),
-            'if':    (ExprType.BOOLEAN, ExprType.VOID,   ExprType.BOOLEAN),
-            '+':     (ExprType.F32,     ExprType.F32,    ExprType.F32),
-            '-':     (ExprType.F32,     ExprType.F32,    ExprType.F32),
-            '*':     (ExprType.F32,     ExprType.F32,    ExprType.F32),
-            '/':     (ExprType.F32,     ExprType.F32,    ExprType.F32),
+            ';': [
+                (ExprType.ANY, ExprType.ANY, ExprType.VOID),
+            ],
+            'print': [
+                (ExprType.VOID, ExprType.ANY, ExprType.VOID),
+            ],
+            'if': [
+                (ExprType.BOOLEAN, ExprType.VOID, ExprType.BOOLEAN),
+            ],
+            'argc': [
+                (ExprType.VOID, ExprType.VOID, ExprType.I32),
+            ],
+            'argv': [
+                (ExprType.VOID, ExprType.I32, ExprType.STRING),
+            ],
+            '+': [
+                (ExprType.I32, ExprType.I32, ExprType.I32),
+                (ExprType.F32, ExprType.F32, ExprType.F32),
+            ],
+            '-': [
+                (ExprType.I32, ExprType.I32, ExprType.I32),
+                (ExprType.F32, ExprType.F32, ExprType.F32),
+            ],
+            '*': [
+                (ExprType.I32, ExprType.I32, ExprType.I32),
+                (ExprType.F32, ExprType.F32, ExprType.F32),
+            ],
+            '/': [
+                (ExprType.I32, ExprType.I32, ExprType.I32),
+                (ExprType.F32, ExprType.F32, ExprType.F32),
+            ],
         }
 
     def coerses_to(self, type_a, type_b):
         if type_a == type_b:
             return True
 
-        if type_b in [ ExprType.VOID, ExprType.STRING ]:
+        if type_b == ExprType.ANY:
             return True
 
         if type_b == ExprType.F32:
@@ -35,30 +59,31 @@ class TypeChecker:
         if isinstance(node, Leaf):
             return self.check_leaf(node)
 
-        op_def = self.ops_defs[node.operation.value]
+        op_defs = self.ops_defs[node.operation.value]
         
-        lhs_type = self.check(node.left).expr_type
-        rhs_type = self.check(node.right).expr_type
+        for op in op_defs:
+            lhs_type = self.check(node.left).expr_type
+            rhs_type = self.check(node.right).expr_type
 
-        if node.operation.value == ';':
-            node.expr_type = rhs_type
-        else:
-            node.expr_type = op_def[2]
+            error = ''
 
-        if not self.coerses_to(lhs_type, op_def[0]):
-            print('Operation {} expects a {} as left operand, got {}'.format(
-                node.operation.value,
-                op_def[0],
-                lhs_type
-            ))
+            if not self.coerses_to(lhs_type, op[0]):
+                error += 'Operation {} expects a {} as left operand, got {}\n'.format(
+                    node.operation.value, op[0], lhs_type)
 
-        if not self.coerses_to(rhs_type, op_def[1]):
-            print('Operation {} expects a {} as right operand, got {}'.format(
-                node.operation.value,
-                op_def[1],
-                rhs_type
-            ))
+            if not self.coerses_to(rhs_type, op[1]):
+                error += 'Operation {} expects a {} as right operand, got {}\n'.format(
+                    node.operation.value, op[1], rhs_type)
 
+            if node.operation.value == ';':
+                node.expr_type = rhs_type
+                return node
+            elif error == '':
+                node.expr_type = op[2]
+                return node
+            
+        print(error)
+        node.expr_type = ExprType.VOID
         return node
 
 

@@ -1,0 +1,5 @@
+void print (void argc void);
+void print (void argv 0);
+void print (void argv 1);
+void print (void argv 2);
+void print (void argv 3);

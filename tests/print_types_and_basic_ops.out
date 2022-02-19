@@ -1,0 +1,26 @@
+Hello, World!
+
+Testing Print Types:
+void
+null
+true
+false
+1
+1.100000
+
+Testing Add:
+4
+15.500000
+
+Testing Sub:
+-2
+14.500000
+
+Testing Mul:
+12
+2.500000
+
+Testing Div:
+2
+1.818182
+

@@ -1,8 +1,0 @@
-void print "Hello, World!";
-void print "Goodbye, Silence!";
-void print 1;
-void print 1.1;
-void print true;
-void print void;
-void print null;
-void print (void print 1);
