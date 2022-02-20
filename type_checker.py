@@ -10,11 +10,20 @@ class TypeChecker:
             ';': [
                 (ExprType.ANY, ExprType.ANY, ExprType.VOID),
             ],
+            'is': [
+                (ExprType.ANY, ExprType.ANY, ExprType.ANY),
+            ],
+            '=': [
+                (ExprType.ANY, ExprType.ANY, ExprType.ANY),
+            ],
             'print': [
                 (ExprType.VOID, ExprType.ANY, ExprType.VOID),
             ],
             'if': [
                 (ExprType.BOOLEAN, ExprType.VOID, ExprType.BOOLEAN),
+            ],
+            'while': [
+                (ExprType.BOOLEAN, ExprType.VOID, ExprType.VOID),
             ],
             'argc': [
                 (ExprType.VOID, ExprType.VOID, ExprType.I32),
