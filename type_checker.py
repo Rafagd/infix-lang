@@ -1,5 +1,5 @@
 from tokenizer import TokenType
-from parser    import Node, Leaf, ExprType
+from parser    import Node, ExprType, print_ast
 
 class TypeChecker:
     def __init__(self):
@@ -65,26 +65,42 @@ class TypeChecker:
         return False
 
     def check(self, node) -> Node:
-        if isinstance(node, Leaf):
+        if len(node.children) == 0:
             return self.check_leaf(node)
 
-        op_defs = self.ops_defs[node.operation.value]
+        valid = True
+        for child in node.children:
+            if self.check(child).expr_type == ExprType.INVALID:
+                valid = False
+
+        if not valid:
+            node.expr_type = ExprType.INVALID
+            return node
+
+        if node.expr_type == ExprType.LIST:
+            node.sub_types.append(node.children[0].expr_type)
+            return node
+
+        if node.expr_type == ExprType.BLOCK:
+            return node
+
+        op_defs = self.ops_defs[node.token.value]
         
         for op in op_defs:
-            lhs_type = self.check(node.left).expr_type
-            rhs_type = self.check(node.right).expr_type
+            lhs_type = node.children[0].expr_type
+            rhs_type = node.children[1].expr_type
 
             error = ''
 
             if not self.coerses_to(lhs_type, op[0]):
                 error += 'Operation {} expects a {} as left operand, got {}\n'.format(
-                    node.operation.value, op[0], lhs_type)
+                    node.token.value, op[0], lhs_type)
 
             if not self.coerses_to(rhs_type, op[1]):
                 error += 'Operation {} expects a {} as right operand, got {}\n'.format(
-                    node.operation.value, op[1], rhs_type)
+                    node.token.value, op[1], rhs_type)
 
-            if node.operation.value == ';':
+            if node.token.value == ';':
                 node.expr_type = rhs_type
                 return node
             elif error == '':
@@ -97,7 +113,10 @@ class TypeChecker:
 
 
     def check_leaf(self, leaf):
-        if leaf.token.kind == TokenType.NULL:
+        if leaf.expr_type != ExprType.VOID:
+            pass
+
+        elif leaf.token.kind == TokenType.NULL:
             leaf.expr_type = ExprType.NULL
 
         elif leaf.token.kind == TokenType.BOOLEAN:

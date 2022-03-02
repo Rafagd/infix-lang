@@ -1,0 +1,11 @@
+void print ();
+void print (,);
+void print (1);
+void print (1,);
+void print (1,2);
+void print (1,2,);
+void print (1,2,3,);
+void print (1,2,3,4);
+void print (1,2,3,4,5);
+void print (1,2,3,4,5,6);
+void print (1,2,3,4,5,6,7);

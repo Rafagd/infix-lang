@@ -34,7 +34,8 @@ class Tokenizer:
         return next(self.cursor);
 
     def first_pass(self):
-        parsing_str = False
+        parsing     = False
+        ptype       = 0
         token       = ''
         token_row   = 1
         token_col   = 1
@@ -43,23 +44,27 @@ class Tokenizer:
             if c == '\n':
                 self.row += 1
                 self.col  = 0
+                if parsing and ptype == 2:
+                    parsing = False
+                    ptype   = 0
+                    token   = ''
 
-            if not parsing_str and c.isspace():
+            if not parsing and c.isspace():
                 if token != '':
                     yield Token(kind=TokenType.UNKNOWN, value=token, row=token_row, col=token_col)
                     token = ''
                 token_row = self.row
                 token_col = self.col + 1
             
-            elif c == ';':
+            elif not parsing and c in [ ',', ';' ]:
                 if token != '':
                     yield Token(kind=TokenType.UNKNOWN, value=token, row=token_row, col=token_col)
                     token = ''
-                yield Token(kind=TokenType.IDENTIFIER, value=';', row=self.row, col=self.col)
+                yield Token(kind=TokenType.IDENTIFIER, value=c, row=self.row, col=self.col)
                 token_row = self.row
                 token_col = self.col + 1
 
-            elif c in [ '{', '(', '[', ']', ')', '}' ]:
+            elif not parsing and c in [ '{', '(', '[', ']', ')', '}' ]:
                 if token != '':
                     yield Token(kind=TokenType.UNKNOWN, value=token, row=token_row, col=token_col)
                     token = ''
@@ -67,13 +72,19 @@ class Tokenizer:
                 token_row = self.row
                 token_col = self.col + 1
 
-            elif c == '"':
-                if not parsing_str:
-                    parsing_str = True
+            elif c == '#' and (not parsing or ptype == 2):
+                parsing = True
+                ptype   = 2
+
+            elif c == '"' and (not parsing or ptype == 1):
+                if not parsing:
+                    parsing = True
+                    ptype   = 1
                     token_row   = self.row
                     token_col   = self.col
                 else:
-                    parsing_str = False
+                    parsing = False
+                    ptype   = 0
                     yield Token(kind=TokenType.STRING, value=token, row=token_row, col=token_col)
                     token = ''
             else:

@@ -1,3 +1,4 @@
+# A comment
 void print "Hello, World!";
 void print "";
 void print "Testing Print Types:";
