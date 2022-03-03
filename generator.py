@@ -1,6 +1,7 @@
 import struct
 
 from enum   import Enum, auto
+from tokenizer import TokenType
 from parser import Node, ExprType, print_ast
 
 def f32_to_hex(number):
@@ -205,19 +206,20 @@ class Generator:
         self.global_types = set()
 
         self.builtin_ops = {
-            'print' : self.generate_print,
-            'is'    : self.generate_declare,
-            '='     : self.generate_assign,
-            '+'     : self.generate_add,
-            '-'     : self.generate_sub,
-            '*'     : self.generate_mul,
-            '/'     : self.generate_div,
-            'argc'  : self.generate_argc,
-            'argv'  : self.generate_argv,
-            'if'    : self.generate_if,
-            'while' : self.generate_while,
-            'list'  : self.generate_list,
-            'block' : self.generate_block,
+            'print'  : self.generate_print,
+            'is'     : self.generate_declare,
+            '='      : self.generate_assign,
+            '+'      : self.generate_add,
+            '-'      : self.generate_sub,
+            '*'      : self.generate_mul,
+            '/'      : self.generate_div,
+            '<'      : self.generate_lt,
+            'argc'   : self.generate_argc,
+            'argv'   : self.generate_argv,
+            '?'      : self.generate_if,
+            'repeat' : self.generate_repeat,
+            'list'   : self.generate_list,
+            'block'  : self.generate_block,
         }
 
     def generate(self, node):
@@ -242,14 +244,12 @@ class Generator:
     def generate_node(self, node):
         if len(node.children) > 0 or node.expr_type in [ ExprType.LIST, ExprType.BLOCK ]:
             return self.builtin_ops[node.token.value](node)
-        
-        if node.expr_type == ExprType.VOID:
-            if node.token.value == 'void':
-                return node, None,
+
+        if node.token.kind == TokenType.IDENTIFIER:
             try:
                 var_type = self.program.get_variable_type(node.token.value)
                 var_ptr  = self.program.get_variable_ptr(node.token.value)
-
+                                    
                 if var_type == 'i32':
                     node.expr_type = ExprType.I32
                 elif var_type == 'float':
@@ -257,8 +257,11 @@ class Generator:
 
                 return node, var_ptr, var_type,
 
-            except: # Could be a declaration
+            except Exception as e: # Could be a declaration
                 pass
+            return node, None,
+
+        if node.expr_type == ExprType.VOID:
             return node, None,
 
         if node.expr_type == ExprType.NULL:
@@ -587,6 +590,25 @@ class Generator:
         return node, vptr,
 
 
+    def generate_lt(self, node):
+        if node.children[0].expr_type != node.children[1].expr_type:
+            raise TypeError('Mismatched types')
+
+        lnode, lptr, *_ = self.generate_node(node.children[0]);
+        rnode, rptr, *_ = self.generate_node(node.children[1]);
+
+        if node.children[0].expr_type == ExprType.I32:
+            self.program.comment('i32 < i32')
+            lreg = self.program.load('i32', 'i32*', lptr)
+            rreg = self.program.load('i32', 'i32*', rptr)
+            vreg = self.program.icmp('slt', 'i32', lreg, rreg)
+            vptr = self.program.alloca('i1')
+            self.program.store('i1', vreg, 'i1*', vptr)
+            self.program.empty_line()
+
+        return node, vptr
+
+
     def generate_argc(self, node):
         self.generate_node(node.children[0]);
         self.generate_node(node.children[1]);
@@ -628,16 +650,16 @@ class Generator:
 
 
     def generate_assign(self, node):
-        lleaf, lptr, ltype = self.generate_node(node.children[0])
-        rleaf, rptr, *_    = self.generate_node(node.children[1])
+        lleaf, lptr, *_ = self.generate_node(node.children[0])
+        rleaf, rptr, *_ = self.generate_node(node.children[1])
 
-        our_type = ltype
-        if ltype == 'float':
-            our_type = 'f32'
-        elif ltype == 'double':
-            our_type = 'f64'
+        if lleaf.expr_type == ExprType.I32:
+            ltype = 'i32'
 
-        self.program.comment('{} = {}'.format(lleaf.token.value, our_type))
+        elif lleaf.expr_type == ExprType.F32:
+            ltype = 'float'
+
+        self.program.comment('{} = {}'.format(lleaf.token.value, ltype))
         ptr = self.program.load(ltype, ltype + '*', rptr)
         self.program.store(ltype, ptr, ltype + '*', lptr)
         self.program.empty_line()
@@ -648,5 +670,28 @@ class Generator:
         pass
     
 
-    def generate_while(self, node):
-        pass
+    def generate_repeat(self, node):
+        repeat_lbl  = self.program.new_label()
+        inside_lbl  = self.program.new_label()
+        outside_lbl = self.program.new_label()
+        end_lbl     = self.program.new_label()
+
+        self.program.comment('repeat')
+        self.program.br(repeat_lbl)
+        self.program.label(repeat_lbl)
+
+        lleaf, lptr, *_ = self.generate_node(node.children[0])
+        lreg = self.program.load('i1', 'i1*', lptr)
+
+        self.program.br_if_else(lreg, inside_lbl, outside_lbl)
+        self.program.label(inside_lbl)
+
+        self.generate_node(node.children[1])
+
+        self.program.br(repeat_lbl)
+        self.program.label(outside_lbl)
+        self.program.br(end_lbl)
+        self.program.label(end_lbl)
+        self.program.empty_line()
+        return node, None,
+

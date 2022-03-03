@@ -113,25 +113,29 @@ class Parser:
                 if CLOSE_BRACES[token.value] != open_bracket:
                     raise Exception('Mismatched braces')
 
-                if sep == None and len(expr) == 0:
-                    prev = self.tokens[index-1]
-                    node = Node(
-                        token = Token(
-                            kind  = TokenType.IDENTIFIER,
-                            value = 'void',
-                            row   = prev.row,
-                            col   = prev.col,
-                        ),
-                        expr_type = ExprType.VOID,
-                    )
-                    return node, index
+                if sep == None:
+                    if len(expr) == 0: # ()
+                        prev = self.tokens[index-1]
+                        node = Node(
+                            token = Token(
+                                kind  = TokenType.IDENTIFIER,
+                                value = 'void',
+                                row   = prev.row,
+                                col   = prev.col,
+                            ),
+                            expr_type = ExprType.VOID,
+                        )
+                        return node, index
 
-                elif sep == None and len(expr) == 1:
-                    if isinstance(expr[0], Node):
-                        node = expr[0]
+                    elif len(expr) == 1:
+                        if isinstance(expr[0], Node):
+                            node = expr[0]
+                        else:
+                            node = Node(token=expr[0])
+                        return node, index
+
                     else:
-                        node = Node(token=expr[0])
-                    return node, index
+                        return self.build_node(expr, ';'), index
 
                 elif sep == ',':
                     node = self.build_node(expr, sep)
@@ -145,7 +149,7 @@ class Parser:
                     return node, index
 
                 else:
-                    return self.build_node(expr, ';'), index
+                    break;
 
             elif token.value == ',' and sep in [ None, ',' ]:
                 sep  = ','

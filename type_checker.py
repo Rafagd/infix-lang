@@ -3,8 +3,7 @@ from parser    import Node, ExprType, print_ast
 
 class TypeChecker:
     def __init__(self):
-        self.var_defs = [
-        ]
+        self.var_defs = [{}]
 
         self.ops_defs = {
             ';': [
@@ -19,11 +18,11 @@ class TypeChecker:
             'print': [
                 (ExprType.VOID, ExprType.ANY, ExprType.VOID),
             ],
-            'if': [
-                (ExprType.BOOLEAN, ExprType.VOID, ExprType.BOOLEAN),
+            '?': [
+                (ExprType.BOOLEAN, ExprType.BLOCK, ExprType.BOOLEAN),
             ],
-            'while': [
-                (ExprType.BOOLEAN, ExprType.VOID, ExprType.VOID),
+            'repeat': [
+                (ExprType.BOOLEAN, ExprType.BLOCK, ExprType.VOID),
             ],
             'argc': [
                 (ExprType.VOID, ExprType.VOID, ExprType.I32),
@@ -46,6 +45,10 @@ class TypeChecker:
             '/': [
                 (ExprType.I32, ExprType.I32, ExprType.I32),
                 (ExprType.F32, ExprType.F32, ExprType.F32),
+            ],
+            '<': [
+                (ExprType.I32, ExprType.I32, ExprType.BOOLEAN),
+                (ExprType.F32, ExprType.F32, ExprType.BOOLEAN),
             ],
         }
 
@@ -85,6 +88,8 @@ class TypeChecker:
             return node
 
         op_defs = self.ops_defs[node.token.value]
+        if node.token.value == 'is':
+            self.var_defs[-1][node.children[0].token.value] = node.children[1].token.value
         
         for op in op_defs:
             lhs_type = node.children[0].expr_type
@@ -131,6 +136,10 @@ class TypeChecker:
         elif leaf.token.kind == TokenType.STRING:
             leaf.expr_type = ExprType.STRING
 
+        elif leaf.token.value in self.var_defs[-1]:
+            var_type = self.var_defs[-1][leaf.token.value]
+            if var_type == 'i32':
+                leaf.expr_type = ExprType.I32
         else:
             leaf.expr_type = ExprType.VOID
 
