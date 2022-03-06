@@ -3,7 +3,10 @@ from parser    import Node, ExprType, print_ast
 
 class TypeChecker:
     def __init__(self):
-        self.var_defs = [{}]
+        self.var_defs = [{
+            'argc' : 'i32',
+            'argv' : 'list,string',
+        }]
 
         self.ops_defs = {
             ';': [
@@ -24,12 +27,6 @@ class TypeChecker:
             'repeat': [
                 (ExprType.BOOLEAN, ExprType.BLOCK, ExprType.VOID),
             ],
-            'argc': [
-                (ExprType.VOID, ExprType.VOID, ExprType.I32),
-            ],
-            'argv': [
-                (ExprType.VOID, ExprType.I32, ExprType.STRING),
-            ],
             '+': [
                 (ExprType.I32, ExprType.I32, ExprType.I32),
                 (ExprType.F32, ExprType.F32, ExprType.F32),
@@ -49,6 +46,16 @@ class TypeChecker:
             '<': [
                 (ExprType.I32, ExprType.I32, ExprType.BOOLEAN),
                 (ExprType.F32, ExprType.F32, ExprType.BOOLEAN),
+            ],
+            '==': [
+                (ExprType.I8,  ExprType.I8,  ExprType.BOOLEAN),
+                (ExprType.I32, ExprType.I32, ExprType.BOOLEAN),
+                (ExprType.F32, ExprType.F32, ExprType.BOOLEAN),
+                (ExprType.F64, ExprType.F64, ExprType.BOOLEAN),
+            ],
+            '@': [
+                (ExprType.LIST,   ExprType.I32, ExprType.STRING),
+                (ExprType.STRING, ExprType.I32, ExprType.I8),
             ],
         }
 
@@ -138,8 +145,12 @@ class TypeChecker:
 
         elif leaf.token.value in self.var_defs[-1]:
             var_type = self.var_defs[-1][leaf.token.value]
+
             if var_type == 'i32':
                 leaf.expr_type = ExprType.I32
+            if var_type == 'list,string':
+                leaf.expr_type = ExprType.LIST
+                leaf.sub_types = [ ExprType.STRING ]
         else:
             leaf.expr_type = ExprType.VOID
 

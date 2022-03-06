@@ -48,6 +48,35 @@ class Node:
         if self.children is None:
             self.children = []
 
+    def to_code(self, brackets=False):
+        if self.token.value == 'list':
+            code = ''
+            for child in self.children:
+                code += child.to_code(brackets=True) + ', '
+            if brackets:
+                return '(' + code[:-1] + ')'
+            return code[:-1]
+
+        if self.token.value == 'block':
+            children = ''
+            for child in self.children:
+                children += child.to_code() + '; '
+            return '{' + children[:-1] + '}'
+
+        if len(self.children) > 0:
+            code = '{} {} {}'.format(
+                self.children[0].to_code(brackets=True),
+                self.token.value,
+                self.children[1].to_code(),
+            )
+            if brackets:
+                return '(' + code + ')'
+            return code
+
+        if self.token.kind == TokenType.STRING:
+            return '"' + self.token.value + '"'
+        return self.token.value
+
 
 class Parser:
     def __init__(self, tokens):

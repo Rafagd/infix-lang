@@ -1,0 +1,13 @@
+index is i32;
+index = 0;
+
+(index < argc) repeat {
+    {
+        ([[argv @ index] @ 0] == ["f" @ 0]) ? {
+            void print "Fizz";
+        }
+    } ? {
+        void print "Buzz";
+    };
+    index = index + 1;
+};

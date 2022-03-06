@@ -1,11 +1,9 @@
-arg-count is i32;
-index     is i32;
+index is i32;
+index = 0;
 
-arg-count = void argc void;
-index     = 0;
-void print arg-count;
+void print argc;
 
-(index < arg-count) repeat {
-    void print void argv index;
+(index < argc) repeat {
+    void print argv @ index;
     index = index + 1
 };

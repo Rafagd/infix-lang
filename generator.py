@@ -32,7 +32,7 @@ class Program:
 
 
     def new_type(self):
-        type_name = '%t' + str(self.reg_count)
+        type_name = '%t' + str(self.type_count)
         self.type_count += 1
         return type_name
 
@@ -213,9 +213,9 @@ class Generator:
             '-'      : self.generate_sub,
             '*'      : self.generate_mul,
             '/'      : self.generate_div,
+            '=='     : self.generate_eq,
             '<'      : self.generate_lt,
-            'argc'   : self.generate_argc,
-            'argv'   : self.generate_argv,
+            '@'      : self.generate_at,
             '?'      : self.generate_if,
             'repeat' : self.generate_repeat,
             'list'   : self.generate_list,
@@ -224,6 +224,7 @@ class Generator:
 
     def generate(self, node):
         self.program.indent += 4
+        self.generate_args()
         self.generate_block(node)
 
         code = ''
@@ -241,8 +242,26 @@ class Generator:
         return code
 
 
+    def generate_args(self):
+        self.program.comment('argc is i32')
+        self.program.declare_variable('i32',  'argc')
+        self.program.empty_line()
+
+        self.program.comment('argc = %argc')
+        self.program.store('i32',  '%argc', 'i32*',  self.program.get_variable_ptr('argc'))
+        self.program.empty_line()
+
+        self.program.comment('argv is [list, i8]')
+        self.program.declare_variable('i8**', 'argv')
+        self.program.empty_line()
+
+        self.program.comment('argv = %argv')
+        self.program.store('i8**', '%argv', 'i8***', self.program.get_variable_ptr('argv'))
+        self.program.empty_line()
+
+
     def generate_node(self, node):
-        if len(node.children) > 0 or node.expr_type in [ ExprType.LIST, ExprType.BLOCK ]:
+        if node.token.value in [ 'list', 'block' ] or len(node.children) > 0:
             return self.builtin_ops[node.token.value](node)
 
         if node.token.kind == TokenType.IDENTIFIER:
@@ -262,37 +281,39 @@ class Generator:
             return node, None,
 
         if node.expr_type == ExprType.VOID:
+            self.program.comment(node.to_code())
+            self.program.empty_line()
             return node, None,
 
         if node.expr_type == ExprType.NULL:
-            self.program.comment('null')
+            self.program.comment(node.to_code())
             ptr = self.program.alloca('i64')
             self.program.store('i64', 0, 'i64*', ptr)
             self.program.empty_line()
             return node, ptr,
 
         if node.expr_type == ExprType.STRING:
-            self.program.comment('string "{}"'.format(node.token.value))
+            self.program.comment(node.to_code())
             ptr = self.generate_string(node.token.value)
             self.program.empty_line()
             return node, ptr,
 
         if node.expr_type == ExprType.BOOLEAN:
-            self.program.comment('bool "{}"'.format(node.token.value))
+            self.program.comment(node.to_code())
             ptr = self.program.alloca('i1')
             self.program.store('i1', node.token.value, 'i1*', ptr)
             self.program.empty_line()
             return node, ptr,
 
         if node.expr_type == ExprType.I32:
-            self.program.comment('i32 "{}"'.format(node.token.value))
+            self.program.comment(node.to_code())
             ptr = self.program.alloca('i32')
             self.program.store('i32', node.token.value, 'i32*', ptr)
             self.program.empty_line()
             return node, ptr,
 
         if node.expr_type == ExprType.F32:
-            self.program.comment('f32 "{}"'.format(node.token.value))
+            self.program.comment(node.to_code())
             ptr = self.program.alloca('float')
             self.program.store('float', f32_to_hex(node.token.value), 'float*', ptr)
             self.program.empty_line()
@@ -306,6 +327,8 @@ class Generator:
             idx_reg_type = 'i32'
         elif node.sub_types[0] == ExprType.I32:
             idx_reg_type = 'i32'
+        elif node.sub_types[0] == ExprType.STRING:
+            idx_reg_type = 'i8*'
         else:
             raise Exception('Unsupported list of type: {}'.format(node.sub_types[0].name))
 
@@ -318,7 +341,7 @@ class Generator:
         lst_reg_type = self.program.type('{{ i32, [{} x {}] }}'.format(len(children), idx_reg_type))
         lst_ptr_type = lst_reg_type + '*'
 
-        self.program.comment('list {}[{}]'.format(idx_reg_type, len(node.children)))
+        self.program.comment(node.to_code())
         lst_ptr = self.program.alloca(lst_reg_type)
         siz_ptr = self.program.get_element_ptr(lst_reg_type, lst_ptr_type, lst_ptr, 'i64', 0, 'i32', 0)
         self.program.store('i32', str(len(node.children)), 'i32*', siz_ptr)
@@ -350,7 +373,10 @@ class Generator:
             idx_ptr = self.program.get_element_ptr(str_type, ptr_type, str_ptr, 'i64', 0, 'i32', 1, 'i8', i)
             self.program.store('i8', ord(value[i]), 'i8*', idx_ptr)
 
-        return idx_ptr
+        str_ptr_ptr = self.program.alloca('i8*')
+        self.program.store('i8*', idx_ptr, 'i8**', str_ptr_ptr)
+
+        return str_ptr_ptr
 
 
     def generate_print(self, node):
@@ -358,19 +384,21 @@ class Generator:
         rnode, rptr, *_ = self.generate_node(node.children[1]);
 
         if node.children[1].expr_type == ExprType.VOID:
-            self.program.comment('print(void)')
+            self.program.comment(node.to_code())
             ptr = self.generate_string('void')
-            self.program.call('i32', '@puts', 'i8*', ptr)
+            reg = self.program.load('i8*', 'i8**', ptr)
+            self.program.call('i32', '@puts', 'i8*', reg)
             self.program.empty_line()
 
         elif node.children[1].expr_type == ExprType.NULL:
-            self.program.comment('print(null)')
+            self.program.comment(node.to_code())
             ptr = self.generate_string('null')
-            self.program.call('i32', '@puts', 'i8*', ptr)
+            reg = self.program.load('i8*', 'i8**', ptr)
+            self.program.call('i32', '@puts', 'i8*', reg)
             self.program.empty_line()
 
         elif node.children[1].expr_type == ExprType.BOOLEAN:
-            self.program.comment('print(bool)')
+            self.program.comment(node.to_code())
             true_lbl  = self.program.new_label()
             false_lbl = self.program.new_label()
             end_lbl   = self.program.new_label()
@@ -380,46 +408,57 @@ class Generator:
             
             self.program.label(true_lbl)
             ptr = self.generate_string('true')
-            self.program.call('i32', '@puts', 'i8*', ptr)
+            reg = self.program.load('i8*', 'i8**', ptr)
+            self.program.call('i32', '@puts', 'i8*', reg)
             self.program.br(end_lbl)
 
             self.program.label(false_lbl)
             ptr = self.generate_string('false')
-            self.program.call('i32', '@puts', 'i8*', ptr)
+            reg = self.program.load('i8*', 'i8**', ptr)
+            self.program.call('i32', '@puts', 'i8*', reg)
             self.program.br(end_lbl)
 
             self.program.label(end_lbl)
             self.program.empty_line()
 
         elif node.children[1].expr_type == ExprType.I32:
-            self.program.comment('print(i32)')
-            str_ptr = self.generate_string('%d\n')
+            self.program.comment(node.to_code())
+            sptr = self.generate_string('%d\n')
+            sreg = self.program.load('i8*', 'i8**', sptr)
             i32_reg = self.program.load('i32', 'i32*', rptr)
-            self.program.call('i32(i8*, ...)', '@printf', 'i8*', str_ptr, 'i32', i32_reg)
+            self.program.call('i32(i8*, ...)', '@printf', 'i8*', sreg, 'i32', i32_reg)
             self.program.empty_line()
 
         elif node.children[1].expr_type == ExprType.F32:
-            self.program.comment('print(f32)')
-            str_ptr = self.generate_string('%f\n')
+            self.program.comment(node.to_code())
+            sptr = self.generate_string('%f\n')
+            sreg = self.program.load('i8*', 'i8**', sptr)
             f32_reg = self.program.load('float', 'float*', rptr)
             f64_reg = self.program.fpext(f32_reg)
-            self.program.call('i32(i8*, ...)', '@printf', 'i8*', str_ptr, 'double', f64_reg)
+            self.program.call('i32(i8*, ...)', '@printf', 'i8*', sreg, 'double', f64_reg)
             self.program.empty_line()
 
         elif node.children[1].expr_type == ExprType.STRING:
-            self.program.comment('print(string)')
-            self.program.call('i32', '@puts', 'i8*', rptr)
+            self.program.comment(node.to_code())
+            rreg = self.program.load('i8*', 'i8**', rptr)
+            self.program.call('i32', '@puts', 'i8*', rreg)
             self.program.empty_line()
 
         elif node.children[1].expr_type == ExprType.LIST:
-            self.program.comment('print(list)')
+            self.program.comment(node.to_code())
             
             ipat = self.generate_string('%d')
             spat = self.generate_string('%s')
+            ipat = self.program.load('i8*', 'i8**', ipat)
+            spat = self.program.load('i8*', 'i8**', spat)
+
 
             stbr = self.generate_string('[')
             sep  = self.generate_string(', ')
             edbr = self.generate_string(']')
+            stbr = self.program.load('i8*', 'i8**', stbr)
+            sep  = self.program.load('i8*', 'i8**', sep)
+            edbr = self.program.load('i8*', 'i8**', edbr)
 
             self.program.call('i32(i8*, ...)', '@printf', 'i8*', spat, 'i8*', stbr)
             
@@ -484,7 +523,7 @@ class Generator:
         if node.children[0].expr_type == ExprType.I32:
             node.expr_type = ExprType.I32
 
-            self.program.comment('i32 + i32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('i32', 'i32*', lptr)
             rreg = self.program.load('i32', 'i32*', rptr)
             vreg = self.program.add('i32', lreg, rreg)
@@ -495,7 +534,7 @@ class Generator:
         elif node.children[0].expr_type == ExprType.F32:
             node.expr_type = ExprType.F32
 
-            self.program.comment('f32 + f32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('float', 'float*', lptr)
             rreg = self.program.load('float', 'float*', rptr)
             vreg = self.program.fadd('float', lreg, rreg)
@@ -514,7 +553,7 @@ class Generator:
         rnode, rptr, *_ = self.generate_node(node.children[1]);
 
         if node.children[0].expr_type == ExprType.I32:
-            self.program.comment('i32 - i32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('i32', 'i32*', lptr)
             rreg = self.program.load('i32', 'i32*', rptr)
             vreg = self.program.sub('i32', lreg, rreg)
@@ -523,7 +562,7 @@ class Generator:
             self.program.empty_line()
 
         elif node.children[0].expr_type == ExprType.F32:
-            self.program.comment('f32 - f32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('float', 'float*', lptr)
             rreg = self.program.load('float', 'float*', rptr)
             vreg = self.program.fsub('float', lreg, rreg)
@@ -542,7 +581,7 @@ class Generator:
         rnode, rptr, *_ = self.generate_node(node.children[1]);
 
         if node.children[0].expr_type == ExprType.I32:
-            self.program.comment('i32 * i32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('i32', 'i32*', lptr)
             rreg = self.program.load('i32', 'i32*', rptr)
             vreg = self.program.mul('i32', lreg, rreg)
@@ -551,7 +590,7 @@ class Generator:
             self.program.empty_line()
 
         elif node.children[0].expr_type == ExprType.F32:
-            self.program.comment('f32 * f32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('float', 'float*', lptr)
             rreg = self.program.load('float', 'float*', rptr)
             vreg = self.program.fmul('float', lreg, rreg)
@@ -570,7 +609,7 @@ class Generator:
         rnode, rptr, *_ = self.generate_node(node.children[1]);
 
         if node.children[0].expr_type == ExprType.I32:
-            self.program.comment('i32 / i32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('i32', 'i32*', lptr)
             rreg = self.program.load('i32', 'i32*', rptr)
             vreg = self.program.sdiv('i32', lreg, rreg)
@@ -579,7 +618,7 @@ class Generator:
             self.program.empty_line()
 
         elif node.children[0].expr_type == ExprType.F32:
-            self.program.comment('f32 / f32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('float', 'float*', lptr)
             rreg = self.program.load('float', 'float*', rptr)
             vreg = self.program.fdiv('float', lreg, rreg)
@@ -598,7 +637,7 @@ class Generator:
         rnode, rptr, *_ = self.generate_node(node.children[1]);
 
         if node.children[0].expr_type == ExprType.I32:
-            self.program.comment('i32 < i32')
+            self.program.comment(node.to_code())
             lreg = self.program.load('i32', 'i32*', lptr)
             rreg = self.program.load('i32', 'i32*', rptr)
             vreg = self.program.icmp('slt', 'i32', lreg, rreg)
@@ -609,27 +648,32 @@ class Generator:
         return node, vptr
 
 
-    def generate_argc(self, node):
-        self.generate_node(node.children[0]);
-        self.generate_node(node.children[1]);
+    def generate_eq(self, node):
+        if node.children[0].expr_type != node.children[1].expr_type:
+            raise TypeError('Mismatched types')
 
-        self.program.comment('void argc void')
-        res_ptr = self.program.alloca('i32')
-        self.program.store('i32', '%argc', 'i32*', res_ptr)
-        self.program.empty_line()
-        return node, res_ptr,
+        lnode, lptr, *_ = self.generate_node(node.children[0]);
+        rnode, rptr, *_ = self.generate_node(node.children[1]);
 
+        if node.children[0].expr_type == ExprType.I8:
+            self.program.comment(node.to_code())
+            lreg = self.program.load('i8', 'i8*', lptr)
+            rreg = self.program.load('i8', 'i8*', rptr)
+            vreg = self.program.icmp('eq', 'i8', lreg, rreg)
+            vptr = self.program.alloca('i1')
+            self.program.store('i1', vreg, 'i1*', vptr)
+            self.program.empty_line()
 
-    def generate_argv(self, node):
-        _               = self.generate_node(node.children[0]);
-        lnode, rptr, *_ = self.generate_node(node.children[1]);
+        if node.children[0].expr_type == ExprType.I32:
+            self.program.comment(node.to_code())
+            lreg = self.program.load('i32', 'i32*', lptr)
+            rreg = self.program.load('i32', 'i32*', rptr)
+            vreg = self.program.icmp('eq', 'i32', lreg, rreg)
+            vptr = self.program.alloca('i1')
+            self.program.store('i1', vreg, 'i1*', vptr)
+            self.program.empty_line()
 
-        self.program.comment('void argv i')
-        right_reg = self.program.load('i32', 'i32*', rptr)
-        argv_ptr  = self.program.get_element_ptr('i8*', 'i8**', '%argv', 'i32', right_reg)
-        argv_reg  = self.program.load('i8*', 'i8**', argv_ptr)
-        self.program.empty_line()
-        return node, argv_reg,
+        return node, vptr
     
 
     def generate_declare(self, node):
@@ -643,7 +687,7 @@ class Generator:
         elif llvm_type == 'f64':
             llvm_type = 'double'
 
-        self.program.comment('{} is {}'.format(lleaf.token.value, rleaf.token.value))
+        self.program.comment(node.to_code())
         self.program.declare_variable(llvm_type, lleaf.token.value)
         self.program.empty_line()
         return node, 
@@ -659,7 +703,7 @@ class Generator:
         elif lleaf.expr_type == ExprType.F32:
             ltype = 'float'
 
-        self.program.comment('{} = {}'.format(lleaf.token.value, ltype))
+        self.program.comment(node.to_code())
         ptr = self.program.load(ltype, ltype + '*', rptr)
         self.program.store(ltype, ptr, ltype + '*', lptr)
         self.program.empty_line()
@@ -667,7 +711,30 @@ class Generator:
     
 
     def generate_if(self, node):
-        pass
+        true_lbl  = self.program.new_label()
+        false_lbl = self.program.new_label()
+        end_lbl   = self.program.new_label()
+
+        self.program.comment(node.to_code())
+        lleaf, lptr, *_ = self.generate_node(node.children[0])
+        lreg = self.program.load('i1', 'i1*', lptr)
+
+        self.program.br_if_else(lreg, true_lbl, false_lbl)
+        self.program.label(true_lbl)
+
+        self.generate_node(node.children[1])
+
+        self.program.br(end_lbl)
+        self.program.label(false_lbl)
+        self.program.br(end_lbl)
+        self.program.label(end_lbl)
+
+        vptr = self.program.alloca('i1')
+        vreg = self.program.icmp('eq', 'i1', lreg, 0)
+        self.program.store('i1', vreg, 'i1*', vptr)
+        
+        self.program.empty_line()
+        return node, vptr,
     
 
     def generate_repeat(self, node):
@@ -676,7 +743,7 @@ class Generator:
         outside_lbl = self.program.new_label()
         end_lbl     = self.program.new_label()
 
-        self.program.comment('repeat')
+        self.program.comment(node.to_code())
         self.program.br(repeat_lbl)
         self.program.label(repeat_lbl)
 
@@ -694,4 +761,35 @@ class Generator:
         self.program.label(end_lbl)
         self.program.empty_line()
         return node, None,
+
+    def generate_at(self, node):
+        lleaf, lptr, *_ = self.generate_node(node.children[0])
+        rleaf, rptr, *_ = self.generate_node(node.children[1])
+
+        if lleaf.expr_type == ExprType.STRING or lleaf.sub_types[0] == ExprType.I8:
+            lidxt = 'i8'
+            lregt = 'i8*'
+            lptrt = 'i8**'
+
+        elif lleaf.sub_types[0] == ExprType.I32:
+            lidxt = 'i32'
+            lregt = 'i32*'
+            lptrt = 'i32**'
+
+        elif lleaf.sub_types[0] == ExprType.STRING:
+            lidxt = 'i8*'
+            lregt = 'i8**'
+            lptrt = 'i8***'
+        
+        self.program.comment(node.to_code())
+        lreg = self.program.load(lregt, lptrt,  lptr)
+        rreg = self.program.load('i32', 'i32*', rptr)
+
+        vreg = self.program.get_element_ptr(lidxt, lregt, lreg, 'i32', rreg)
+        vidx = self.program.load(lidxt, lregt, vreg)
+
+        vptr = self.program.alloca(lidxt)
+        self.program.store(lidxt, vidx, lregt, vptr)
+        self.program.empty_line()
+        return node, vptr,
 
