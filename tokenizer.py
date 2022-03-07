@@ -7,6 +7,7 @@ class TokenType(Enum):
     UNKNOWN    = auto()
     IDENTIFIER = auto()
     BRACKET    = auto()
+    VOID       = auto()
     NULL       = auto()
     BOOLEAN    = auto()
     INTEGER    = auto()
@@ -96,6 +97,9 @@ class Tokenizer:
         for token in self.first_pass():
             if token.kind != TokenType.UNKNOWN:
                 pass
+
+            elif token.value == 'void':
+                token.kind = TokenType.VOID
 
             elif token.value == 'null':
                 token.kind = TokenType.NULL

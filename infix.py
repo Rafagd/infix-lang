@@ -4,7 +4,6 @@ import sys
 
 from tokenizer import Tokenizer
 from parser    import Parser, print_ast
-from type_checker import TypeChecker
 from generator import Generator
 
 if __name__ == '__main__':
@@ -38,14 +37,11 @@ if __name__ == '__main__':
         print_ast(ast)
         sys.exit(0)
 
-    type_checker = TypeChecker()
-    ast = type_checker.check(ast)
+    ir_repr = Generator().generate(ast)
 
     if option == '--type-checker':
         print_ast(ast)
         sys.exit(0)
-
-    ir_repr = Generator(type_checker.var_defs, type_checker.ops_defs).generate(ast)
 
     if True or option == '--code-gen':
         print(ir_repr)

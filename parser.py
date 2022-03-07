@@ -147,7 +147,7 @@ class Parser:
                         prev = self.tokens[index-1]
                         node = Node(
                             token = Token(
-                                kind  = TokenType.IDENTIFIER,
+                                kind  = TokenType.VOID,
                                 value = 'void',
                                 row   = prev.row,
                                 col   = prev.col,

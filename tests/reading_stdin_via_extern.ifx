@@ -1,0 +1,6 @@
+scanf extern ("i32", "i8*", "...");
+
+input is i32;
+scanf call ("%d", input);
+
+void print input;

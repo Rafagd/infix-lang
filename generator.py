@@ -1,209 +1,18 @@
 import struct
 
-from enum   import Enum, auto
+from enum      import Enum, auto
 from tokenizer import TokenType
-from parser import Node, ExprType, print_ast
+from parser    import Node, ExprType, print_ast
+from llvm      import Program
 
 def f32_to_hex(number):
     u32_repr = struct.unpack('@Q', struct.pack('@d', float(number)))[0]
     return '0x{:X}'.format(u32_repr & 0xFFFF_FFFF_E000_0000)
 
-class Program:
-    def __init__(self):
-        self.type_count  = 0
-        self.reg_count   = 0
-        self.label_count = 0
-        self.indent      = 0
-        self.declared    = {}
-        self.code        = ''
-        self.globals     = ''
-        self.scope       = { 'main': {} }
-        self.current_scope = 'main'
-
-
-    def new_register(self):
-        register = '%r' + str(self.reg_count)
-        self.reg_count += 1
-        return register
-
-
-    def last_register(self):
-        return '%r' + str(self.reg_count - 1)
-
-
-    def new_type(self):
-        type_name = '%t' + str(self.type_count)
-        self.type_count += 1
-        return type_name
-
-
-    def new_label(self):
-        label_name = 'lbl' + str(self.label_count)
-        self.label_count += 1
-        return label_name
-
-
-    def instr(self, instruction, *args):
-        if len(args) > 0:
-            return ' ' * self.indent + instruction.format(*args) + '\n'
-        else:
-            return ' ' * self.indent + instruction + '\n'
-
-
-    def comment(self, comment):
-        self.code += '; {}\n'.format(comment)
-
-
-    def empty_line(self):
-        self.code += '\n'
-
-    
-    def change_scope(self, scope):
-        self.current_scope = scope
-
-
-    def declare_variable(self, var_type, var_name):
-        var_ptr = self.alloca(var_type)
-        self.scope[self.current_scope][var_name] = (var_type, var_ptr)
-
-
-    def get_variable_type(self, var_name):
-        return self.scope[self.current_scope][var_name][0]
-
-
-    def get_variable_ptr(self, var_name):
-        return self.scope[self.current_scope][var_name][1]
-
-
-    def type(self, declaration):
-        try:
-            type_reg = self.declared[hash(declaration)]
-        except:
-            type_reg      = self.new_type()
-            self.globals += '{} = type {}\n'.format(type_reg, declaration)
-            self.declared[hash(declaration)] = type_reg
-        return type_reg
-
-
-    def label(self, name):
-        self.code += name + ':\n'
-
-
-    def load(self, store_type, value_type, value):
-        reg = self.new_register()
-        self.code += self.instr('{} = load {}, {} {}', reg, store_type, value_type, value)
-        return reg
-
-
-    def store(self, value_type, value, store_type, store_reg):
-        self.code += self.instr('store {} {}, {} {}', value_type, value, store_type, store_reg)
-
-
-    def alloca(self, mem_type):
-        ptr = self.new_register()
-        self.code += self.instr('{} = alloca {}', ptr, mem_type)
-        return ptr
-
-
-    def get_element_ptr(self, mem_type, reg_type, reg_name, *args):
-        ptr   = self.new_register()
-        instr = '{} = getelementptr {}, {} {}'.format(ptr, mem_type, reg_type, reg_name)
-
-        it = iter(args)
-        for arg_type, arg_value in zip(it, it):
-            instr += ', {} {}'.format(arg_type, arg_value)
-
-        self.code += self.instr(instr)
-        return ptr
-
-
-    def call(self, fn_type, fn_name, *args):
-        args_lst = []
-
-        it = iter(args)
-        for arg_type, arg_value in zip(it, it):
-            args_lst.append('{} {}'.format(arg_type, arg_value))
-
-        reg        = self.new_register()
-        self.code += self.instr('{} = call {} {}({})', reg, fn_type, fn_name, ', '.join(args_lst))
-        return reg
-
-
-    def br_if_else(self, cond_reg, true_lbl, false_lbl):
-        self.code += self.instr('br i1 {}, label %{}, label %{}', cond_reg, true_lbl, false_lbl)
-
-
-    def br(self, label):
-        self.code += self.instr('br label %{}', label)
-
-
-    def fpext(self, fp_reg):
-        dbl_reg = self.new_register()
-        self.code += self.instr('{} = fpext float {} to double', dbl_reg, fp_reg)
-        return dbl_reg
-
-
-    def add(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = add {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def fadd(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = fadd {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def sub(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = sub {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def fsub(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = fsub {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def mul(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = mul {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def fmul(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = fmul {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def sdiv(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = sdiv {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def fdiv(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = fdiv {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def icmp(self, cmp_type, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = icmp {} {} {}, {}', reg, cmp_type, reg_type, a_reg, b_reg)
-        return reg
-
 
 class Generator:
-    def __init__(self, vrs, ops):
+    def __init__(self):
         self.program = Program()
-        self.vars  = vrs
-        self.ops   = ops
-        self.stack = [[]]
-        self.global_types = set()
 
         self.builtin_ops = {
             'print'  : self.generate_print,
@@ -220,6 +29,8 @@ class Generator:
             'repeat' : self.generate_repeat,
             'list'   : self.generate_list,
             'block'  : self.generate_block,
+            'extern' : self.generate_extern,
+            'call'   : self.generate_call,
         }
 
     def generate(self, node):
@@ -273,50 +84,65 @@ class Generator:
                     node.expr_type = ExprType.I32
                 elif var_type == 'float':
                     node.expr_type = ExprType.F32
+                elif var_type == 'i8**':
+                    node.expr_type = ExprType.LIST
+                    node.sub_types = [ ExprType.STRING ]
+                else:
+                    raise Exception('Unknown type: ' + var_type)
 
                 return node, var_ptr, var_type,
 
-            except Exception as e: # Could be a declaration
+            except IndexError as e: # Could be a declaration
                 pass
             return node, None,
 
-        if node.expr_type == ExprType.VOID:
+        if node.token.kind == TokenType.VOID:
             self.program.comment(node.to_code())
             self.program.empty_line()
             return node, None,
 
-        if node.expr_type == ExprType.NULL:
+        if node.token.kind == TokenType.NULL:
             self.program.comment(node.to_code())
             ptr = self.program.alloca('i64')
             self.program.store('i64', 0, 'i64*', ptr)
             self.program.empty_line()
+
+            node.expr_type = ExprType.NULL
             return node, ptr,
 
-        if node.expr_type == ExprType.STRING:
-            self.program.comment(node.to_code())
-            ptr = self.generate_string(node.token.value)
-            self.program.empty_line()
-            return node, ptr,
-
-        if node.expr_type == ExprType.BOOLEAN:
+        if node.token.kind == TokenType.BOOLEAN:
             self.program.comment(node.to_code())
             ptr = self.program.alloca('i1')
             self.program.store('i1', node.token.value, 'i1*', ptr)
             self.program.empty_line()
+
+            node.expr_type = ExprType.BOOLEAN
             return node, ptr,
 
-        if node.expr_type == ExprType.I32:
+        if node.token.kind == TokenType.INTEGER:
             self.program.comment(node.to_code())
             ptr = self.program.alloca('i32')
             self.program.store('i32', node.token.value, 'i32*', ptr)
             self.program.empty_line()
+
+            node.expr_type = ExprType.I32
             return node, ptr,
 
-        if node.expr_type == ExprType.F32:
+        if node.token.kind == TokenType.FLOAT:
             self.program.comment(node.to_code())
             ptr = self.program.alloca('float')
             self.program.store('float', f32_to_hex(node.token.value), 'float*', ptr)
             self.program.empty_line()
+
+            node.expr_type = ExprType.F32
+            return node, ptr,
+
+        if node.token.kind == TokenType.STRING:
+            self.program.comment(node.to_code())
+            ptr = self.generate_string(node.token.value)
+            self.program.empty_line()
+
+            node.expr_type = ExprType.STRING
             return node, ptr,
 
         raise Exception(str(node))
@@ -521,8 +347,6 @@ class Generator:
         rnode, rptr, *_ = self.generate_node(node.children[1]);
 
         if node.children[0].expr_type == ExprType.I32:
-            node.expr_type = ExprType.I32
-
             self.program.comment(node.to_code())
             lreg = self.program.load('i32', 'i32*', lptr)
             rreg = self.program.load('i32', 'i32*', rptr)
@@ -532,8 +356,6 @@ class Generator:
             self.program.empty_line()
 
         elif node.children[0].expr_type == ExprType.F32:
-            node.expr_type = ExprType.F32
-
             self.program.comment(node.to_code())
             lreg = self.program.load('float', 'float*', lptr)
             rreg = self.program.load('float', 'float*', rptr)
@@ -542,6 +364,7 @@ class Generator:
             self.program.store('float', vreg, 'float*', vptr)
             self.program.empty_line()
 
+        node.expr_type = lnode.expr_type
         return node, vptr,
 
 
@@ -570,6 +393,7 @@ class Generator:
             self.program.store('float', vreg, 'float*', vptr)
             self.program.empty_line()
 
+        node.expr_type = lnode.expr_type
         return node, vptr,
 
 
@@ -598,6 +422,7 @@ class Generator:
             self.program.store('float', vreg, 'float*', vptr)
             self.program.empty_line()
 
+        node.expr_type = lnode.expr_type
         return node, vptr,
 
 
@@ -626,6 +451,7 @@ class Generator:
             self.program.store('float', vreg, 'float*', vptr)
             self.program.empty_line()
 
+        node.expr_type = lnode.expr_type
         return node, vptr,
 
 
@@ -645,6 +471,7 @@ class Generator:
             self.program.store('i1', vreg, 'i1*', vptr)
             self.program.empty_line()
 
+        node.expr_type = ExprType.BOOLEAN
         return node, vptr
 
 
@@ -673,14 +500,15 @@ class Generator:
             self.program.store('i1', vreg, 'i1*', vptr)
             self.program.empty_line()
 
+        node.expr_type = ExprType.BOOLEAN
         return node, vptr
     
 
     def generate_declare(self, node):
-        lleaf, *_ = self.generate_node(node.children[0]);
-        rleaf, *_ = self.generate_node(node.children[1]);
+        node_ident = node.children[0]
+        node_type  = node.children[1]
 
-        llvm_type = rleaf.token.value
+        llvm_type = node_type.token.value
         
         if llvm_type == 'f32':
             llvm_type = 'float'
@@ -688,9 +516,9 @@ class Generator:
             llvm_type = 'double'
 
         self.program.comment(node.to_code())
-        self.program.declare_variable(llvm_type, lleaf.token.value)
+        vptr = self.program.declare_variable(llvm_type, node_ident.token.value)
         self.program.empty_line()
-        return node, 
+        return node, vptr,
 
 
     def generate_assign(self, node):
@@ -702,6 +530,9 @@ class Generator:
 
         elif lleaf.expr_type == ExprType.F32:
             ltype = 'float'
+
+        else:
+            raise Exception('Unrecognized type: ' + str(lleaf))
 
         self.program.comment(node.to_code())
         ptr = self.program.load(ltype, ltype + '*', rptr)
@@ -762,6 +593,7 @@ class Generator:
         self.program.empty_line()
         return node, None,
 
+
     def generate_at(self, node):
         lleaf, lptr, *_ = self.generate_node(node.children[0])
         rleaf, rptr, *_ = self.generate_node(node.children[1])
@@ -791,5 +623,19 @@ class Generator:
         vptr = self.program.alloca(lidxt)
         self.program.store(lidxt, vidx, lregt, vptr)
         self.program.empty_line()
+
+        if lleaf.expr_type == ExprType.LIST:
+            node.expr_type = lleaf.sub_types[0]
+        elif lleaf.expr_type == ExprType.STRING:
+            node.expr_type = ExprType.I8
         return node, vptr,
+
+
+    def generate_extern(self, node):
+        return node, None,
+
+
+    def generate_call(self, node):
+        return node, None,
+
 
