@@ -1,9 +1,9 @@
 index is i32;
 index = 0;
 
-void print argc;
+void println argc;
 
 (index < argc) repeat {
-    void print argv @ index;
+    void println argv @ index;
     index = index + 1
 };

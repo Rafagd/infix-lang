@@ -1,61 +1,81 @@
 import struct
 
+from dataclasses import dataclass
 from enum      import Enum, auto
 from tokenizer import TokenType
 from parser    import Node, ExprType, print_ast
-from llvm      import Program
+from llvm      import Module, Type
 
 def f32_to_hex(number):
     u32_repr = struct.unpack('@Q', struct.pack('@d', float(number)))[0]
     return '0x{:X}'.format(u32_repr & 0xFFFF_FFFF_E000_0000)
 
+@dataclass
+class Result:
+    name: str  = None
+    type: Type = None
+    
+    def __post_init__(self):
+        if self.name is None:
+            self.type = Type(name='%void', repr='void', primitive=True)
+        elif self.type is None:
+            raise Exception('Result must have a type unless void')
+            
 
 class Generator:
     def __init__(self):
-        self.program = Program()
-
-        self.builtin_ops = {
-            'print'  : self.generate_print,
-            'is'     : self.generate_declare,
-            '='      : self.generate_assign,
-            '+'      : self.generate_add,
-            '-'      : self.generate_sub,
-            '*'      : self.generate_mul,
-            '/'      : self.generate_div,
-            '=='     : self.generate_eq,
-            '<'      : self.generate_lt,
-            '@'      : self.generate_at,
-            '?'      : self.generate_if,
-            'repeat' : self.generate_repeat,
-            'list'   : self.generate_list,
-            'block'  : self.generate_block,
-            'extern' : self.generate_extern,
-            'call'   : self.generate_call,
-        }
+        self.module = Module()
 
     def generate(self, node):
-        self.program.indent += 4
-        self.generate_args()
-        self.generate_block(node)
+        self.generate_node(node)
+        return self.module.to_llvm_ir()
 
-        code = ''
+    def generate_node(self, node):
+        results = []
+        for child in node.children:
+            results.append(self.generate_node(child))
 
-        for decl in self.program.globals:
-            code += decl
+        if node.token.kind != TokenType.IDENTIFIER:
+            return self.generate_leaf(node)
 
-        code += 'declare i32 @printf(i8*, ...)\n'
-        code += 'declare i32 @puts(i8*)\n'
-        code += 'define i32 @main(i32 %argc, i8** %argv)\n'
-        code += '{\n'
-        code +=      self.program.code
-        code += '    ret i32 0\n'
-        code += '}\n'
-        return code
+        try:
+            self.module.call(node.token.value, results[0], results[1])
+        except:
+            pass
+
+    def generate_leaf(self, leaf):
+        llvm = self.module.current.llvm
+
+        if leaf.token.kind == TokenType.VOID:
+            leaf.expr_type = ExprType.VOID
+            return Result()
+
+        if leaf.token.kind == TokenType.NULL:
+            leaf.expr_type = ExprType.NULL
+            return self.module.const_ptr('null')
+
+        if leaf.token.kind == TokenType.BOOLEAN:
+            leaf.expr_type = ExprType.BOOLEAN
+            return Result()
+
+        if leaf.token.kind == TokenType.INTEGER:
+            leaf.expr_type = ExprType.I32
+            return self.module.const_i32(leaf.token.value)
+
+        if leaf.token.kind == TokenType.FLOAT:
+            leaf.expr_type = ExprType.F32
+            return self.module.const_f32(leaf.token.value)
+
+        if leaf.token.kind == TokenType.STRING:
+            leaf.expr_type = ExprType.STRING
+            return self.module.const_cstr(leaf.token.value)
+
+        raise Exception('Unknown type: ' + leaf.token.kind.name)
 
 
     def generate_args(self):
-        self.program.comment('argc is i32')
-        self.program.declare_variable('i32',  'argc')
+        self.program.commented_block('argc is i32')
+        self.program.new_variable('argc', 'i32',  'argc')
         self.program.empty_line()
 
         self.program.comment('argc = %argc')
@@ -71,9 +91,16 @@ class Generator:
         self.program.empty_line()
 
 
-    def generate_node(self, node):
+    def generate_nodea(self, node):
         if node.token.value in [ 'list', 'block' ] or len(node.children) > 0:
-            return self.builtin_ops[node.token.value](node)
+            if node.token.value in self.builtin_ops:
+                return self.builtin_ops[node.token.value](node)
+
+            var_type = self.program.get_variable_type(node.token.value)
+            if var_type == ExprType.BLOCK:
+                return self.generate_op_call(node)
+
+            raise Exception('Undeclared operation: ' + node.token.value)
 
         if node.token.kind == TokenType.IDENTIFIER:
             try:
@@ -103,8 +130,7 @@ class Generator:
 
         if node.token.kind == TokenType.NULL:
             self.program.comment(node.to_code())
-            ptr = self.program.alloca('i64')
-            self.program.store('i64', 0, 'i64*', ptr)
+            ptr = self.program.const_null()
             self.program.empty_line()
 
             node.expr_type = ExprType.NULL
@@ -182,9 +208,11 @@ class Generator:
 
 
     def generate_block(self, node):
+        vptr = None
         for child in node.children:
-            self.generate_node(child)
-        return node
+            print(child)
+            _, vptr, *_ = self.generate_node(child)
+        return node, vptr,
 
 
     def generate_string(self, value):
@@ -514,11 +542,29 @@ class Generator:
             llvm_type = 'float'
         elif llvm_type == 'f64':
             llvm_type = 'double'
+        else:
+            return self.generate_op_declare(node)
 
         self.program.comment(node.to_code())
         vptr = self.program.declare_variable(llvm_type, node_ident.token.value)
         self.program.empty_line()
         return node, vptr,
+
+    def generate_op_declare(self, node):
+        old_program  = self.program
+        self.program = Program()
+        self.program.scope['main'] = { 'left' : ('i32', '%left'), 'right': ('i32', '%right') }
+        vnode, vptr, *_, = self.generate_node(node.children[1])
+        
+        old_program.globals += self.program.globals
+        old_program.globals += 'define {} @{}({}) {{\n'.format(vnode.expr_type.name, node.children[0].token.value, 'i32 %left, i32 %right')
+        old_program.globals +=     self.program.code
+        old_program.globals += '   ret ' + vptr + '\n'
+        old_program.globals += '}\n'
+
+
+        self.program = old_program
+        return node, '@' + node.children[0].token.value,
 
 
     def generate_assign(self, node):

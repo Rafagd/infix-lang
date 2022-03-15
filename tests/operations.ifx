@@ -1,0 +1,26 @@
+add is {
+    left + right
+};
+
+void println 1 add 2;
+
+mul is {
+    (index  is i32) = 0;
+    (result is i32) = 0;
+    (index < right) repeat {
+        result = result + left;
+    };
+    result
+};
+
+early_return is {
+    (right > 0) ? {
+        void println "EARLY";
+        void return void;
+    };
+    void println "LATE";
+};
+
+void early_return -1;
+void early_return 1;
+

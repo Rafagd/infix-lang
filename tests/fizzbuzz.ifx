@@ -4,10 +4,10 @@ index = 0;
 (index < argc) repeat {
     {
         ([[argv @ index] @ 0] == ["f" @ 0]) ? {
-            void print "Fizz";
+            void println "Fizz";
         }
     } ? {
-        void print "Buzz";
+        void println "Buzz";
     };
     index = index + 1;
 };

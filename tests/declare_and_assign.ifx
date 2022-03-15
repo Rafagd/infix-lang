@@ -1,7 +1,7 @@
 integer is i32;
 integer = 1337;
-void print integer;
+void println integer;
 
 float is f32;
 float = 0.1337;
-void print float
+void println float
