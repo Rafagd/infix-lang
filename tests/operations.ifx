@@ -1,19 +1,32 @@
 add is {
+    left   is i32;
+    right  is i32;
+
     left + right
 };
 
 void println 1 add 2;
 
 mul is {
-    (index  is i32) = 0;
-    (result is i32) = 0;
+    left   is i32;
+    right  is i32;
+    result is i32;
+
+    index  is i32;
+    index  = 0;
+    result = 0;
     (index < right) repeat {
         result = result + left;
+        index  = index + 1;
     };
-    result
+
+    void return result;
 };
 
+void println 3 mul 2;
+
 early_return is {
+    right is i32;
     (right > 0) ? {
         void println "EARLY";
         void return void;

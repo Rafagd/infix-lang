@@ -77,6 +77,13 @@ class Node:
             return '"' + self.token.value + '"'
         return self.token.value
 
+    def __str__(self):
+        return repr(self)
+
+    def __repr__(self):
+        children = ', '.join([ repr(child) for child in self.children ])
+        return '{{{} {} [{}]}}'.format(self.expr_type.name, self.token.value, children)
+
 
 class Parser:
     def __init__(self, tokens):

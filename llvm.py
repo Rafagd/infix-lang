@@ -21,27 +21,37 @@ class CommentContext:
         self.llvm.line('')
 
 class DefineContext:
-    def __init__(self, llvm, rtype, name, *args):
-        self.llvm  = llvm
-        self.rtype = rtype
-        self.name  = name
-        self.args  = args
+    def __init__(self, llvm, internal, rtype, name, *args, **kwargs):
+        self.llvm     = llvm
+        self.rtype    = rtype
+        self.name     = name
+        self.internal = internal
+        self.args     = args
+
 
     def __enter__(self):
         args = ''
         for i in range(0, len(self.args), 2):
             args += self.args[i] + ' ' + self.args[i+1] + ', '
-        self.llvm.line('define {} {}({})', self.rtype, self.name, args[:-2])
+        self.llvm.line('define {} {} {}({})', 
+            'internal' if self.internal else 'external',
+            self.rtype,
+            self.name,
+            args[:-2]
+        )
         self.llvm.line('{')
 
     def __exit__(self, *exception):
+        if self.name == '@main':
+            self.llvm.ret('i32', '0')
         if self.rtype == 'void':
-            self.llvm.instr('ret void')
+            self.llvm.ret('void')
         self.llvm.line('}')
 
 class LLVM:
     def __init__(self):
         self.last_reg = 0
+        self.last_lbl = 0
         self.code     = ''
 
     def line(self, line, *args):
@@ -55,6 +65,10 @@ class LLVM:
 
     def commented_block(self, comment):
         return CommentContext(self, comment)
+
+    def next_lbl(self):
+        self.last_lbl += 1
+        return 'lbl' + str(self.last_lbl)
 
     def label(self, label_name):
         self.line(label_name + ':')
@@ -72,15 +86,21 @@ class LLVM:
         argptrn = ', '.join([ '{}' for _ in args ])
         self.line('declare {} {}(' + argptrn + ')', rtype, name, *args)
 
-    def define(self, name, rtype, *args):
-        return DefineContext(self, rtype, name, *args)
+    def define(self, internal, name, rtype, *args):
+        return DefineContext(self, internal, rtype, name, *args)
 
     def instr(self, instruction, *args):
         self.line(4 * ' ' + instruction, *args)
 
     def next_reg(self):
         self.last_reg += 1
-        return '%' + str(self.last_reg)
+        return '%reg' + str(self.last_reg)
+
+    def alloca(self, type, reg=None):
+        if reg is None:
+            reg = self.next_reg()
+        self.instr('{} = alloca {}', reg, type)
+        return reg
 
     def get_element_ptr(self, rtype, ptype, pname, *args):
         reg   = self.next_reg()
@@ -92,6 +112,9 @@ class LLVM:
         reg = self.next_reg()
         self.instr('{} = load {}, {} {}', reg, store_type, value_type, value)
         return reg
+
+    def store(self, rtype, rname, ptype, pname):
+        self.instr('store {} {}, {} {}', rtype, rname, ptype, pname)
 
     def fpext(self, f32_reg):
         reg = self.next_reg()
@@ -111,8 +134,11 @@ class LLVM:
             self.instr(instr, ftype, fname, *args)
             return None
 
-    def ret(self, rret):
-        self.instr('ret {}'.format(rret))
+    def ret(self, type, reg=None):
+        if reg is None:
+            self.instr('ret {}'.format(type))
+        else:
+            self.instr('ret {} {}'.format(type, reg))
 
     def br_if_else(self, cdreg, tlabel, flabel):
         self.instr('br i1 {}, label %{}, label %{}', cdreg, tlabel, flabel)
@@ -123,18 +149,60 @@ class LLVM:
     def label(self, name):
         self.line(name + ':')
 
-    def icmp(self, op, rtype, areg, breg):
+    def icmp(self, op, rtype, a, b):
         reg = self.next_reg()
-        self.instr('{} = icmp {} {} {}, {}', reg, op, rtype, areg, breg)
+        self.instr('{} = icmp {} {} {}, {}', reg, op, rtype, a, b)
+        return reg
+
+    def add(self, rtype, a, b):
+        reg = self.next_reg()
+        self.instr('{} = add {} {}, {}', reg, rtype, a, b)
+        return reg
+
+    def fadd(self, rtype, a, b):
+        reg = self.next_reg()
+        self.instr('{} = fadd {} {}, {}', reg, rtype, a, b)
+        return reg
+
+    def sub(self, rtype, a, b):
+        reg = self.next_reg()
+        self.instr('{} = sub {} {}, {}', reg, rtype, a, b)
+        return reg
+
+    def fsub(self, rtype, a, b):
+        reg = self.next_reg()
+        self.instr('{} = fsub {} {}, {}', reg, rtype, a, b)
+        return reg
+
+    def mul(self, rtype, a, b):
+        reg = self.next_reg()
+        self.instr('{} = mul {} {}, {}', reg, rtype, a, b)
+        return reg
+
+    def fmul(self, rtype, a, b):
+        reg = self.next_reg()
+        self.instr('{} = fmul {} {}, {}', reg, rtype, a, b)
+        return reg
+
+    def sdiv(self, rtype, a, b):
+        reg = self.next_reg()
+        self.instr('{} = sdiv {} {}, {}', reg, rtype, a, b)
+        return reg
+
+    def fdiv(self, rtype, a, b):
+        reg = self.next_reg()
+        self.instr('{} = fdiv {} {}, {}', reg, rtype, a, b)
         return reg
 
 
 class ProgramError(Exception):
     pass
 
-class ProgramTypeError(Exception):
+class ProgramTypeError(ProgramError):
     pass
 
+class ProgramUnknownOperationError(ProgramError):
+    pass
 
 @dataclass
 class Type:
@@ -161,8 +229,17 @@ class Variable:
     implicit: bool = False
 
     def __post_init__(self):
+        if type is None:
+            raise LLVMTypeError('Variables MUST have a type')
+
+        if self.type.name == '%void':
+            self.name = '%void'
+
         if self.name[0] not in [ '%', '@' ]:
-            raise LLVMTypeError('Type names MUST start with % or @')
+            raise LLVMTypeError('Variable names MUST start with % or @')
+
+    def __str__(self):
+        return repr(self)
 
     def __repr__(self):
         if self.value is None:
@@ -174,17 +251,31 @@ class Variable:
 
 @dataclass
 class Function:
-    name:   str
-    llvm:   LLVM              = None
-    args:   Dict[Variable]    = None
-    rtype:  Type              = None
-    instrs: List[Instruction] = None
+    name:      str
+    llvm:      LLVM           = None
+    args:      Dict[Variable] = None
+    rtype:     Type           = None
+    variables: Dict[Variable] = None
+    internal:  bool           = False
 
     def __post_init__(self):
         if self.name[0] != '@':
             raise LLVMTypeError('Operation names MUST start with @')
+
         if self.llvm is None:
             self.llvm = LLVM()
+
+        if self.args is None:
+            self.args = {}
+
+        if self.variables is None:
+            self.variables = {}
+
+    def __str__(self):
+        return repr(self)
+
+    def __repr__(self):
+        return self.name + ' -> ' + self.rtype.name
 
 
 @dataclass
@@ -243,7 +334,7 @@ class Module:
                 '%argc' : Variable(name='%argc', type=self.type('%i32')),
                 '%argv' : Variable(name='%argv', type=self.type('%cstr.ptr')),
             },
-            rtype = self.type('%void'),
+            rtype = self.type('%i32'),
         )
 
         self.current = self.functions['@main']
@@ -263,18 +354,54 @@ class Module:
                 raise ProgramTypeError('Undeclared type: ' + name)
             return self.new_type(name, repr, primitive)
 
-    def new_variable(self, name, type, value):
+    def new_global_var(self, name, type, value):
         if name not in self.variables:
             self.variables[name] = Variable(name=name, type=type, value=value)
         else:
             raise ProgramTypeError('Duplicated variable: ' + name)
         return self.variables[name]
     
-    def variable(self, name):
+    def global_var(self, name):
         try:
             return self.variables[name]
         except KeyError:
             raise ProgramError('Undeclared variable: ' + name)
+
+    def new_variable(self, name, type):
+        with self.current.llvm.commented_block('new ' + name):
+            if name in self.current.args or name in self.current.variables:
+                raise ProgramTypeError('Duplicated variable: ' + name)
+
+            if name in [ '%left', '%right' ]:
+                self.current.args[name] = Variable(name=name, type=type)
+                return self.current.args[name]
+
+            reg = self.current.llvm.alloca(type.to_llvm_ir(), reg=name)
+            self.current.variables[name] = Variable(name=reg, type=type)
+            return self.current.variables[name]
+    
+    def variable(self, name):
+        with self.current.llvm.commented_block('variable '+name):
+            # Try to find a local-scope variable
+            try:                            
+                ptr = self.current.variables[name]
+                reg = self.current.llvm.load(
+                    ptr.type.to_llvm_ir(),
+                    ptr.type.to_llvm_ir() + '*',
+                    ptr.name
+                )
+                return Variable(name=reg, type=ptr.type)
+            except KeyError:
+                pass
+
+            # Try to find an argument variable
+            try:
+                return self.current.args[name]
+            except KeyError:
+                pass
+            
+            # Finally, try a global-scope variable or fail
+            return self.global_var(name)
 
     def const(self, type, value):
         index = type.name + ';' + value
@@ -284,16 +411,66 @@ class Module:
 
         except KeyError:
             self.last_const_reg += 1
-            self.const_regs[index] = self.new_variable(
+            self.const_regs[index] = self.new_global_var(
                 name  = '@const.{}'.format(self.last_const_reg),
                 type  = type,
                 value = value
             )
             return self.const_regs[index]
 
+    def deref_ptr(self, ptr):
+        with self.current.llvm.commented_block('deref ' + ptr.name):
+            reg = self.current.llvm.load(
+                ptr.type.to_llvm_ir(),
+                ptr.type.to_llvm_ir() + '*',
+                ptr.name
+            )
+            return Variable(name=reg, type=ptr.type)
+
+    def assign(self, pname, reg):
+        with self.current.llvm.commented_block('{} = {}'.format(pname, reg)):
+            self.current.llvm.store(
+                reg.type.to_llvm_ir(),       reg.name,
+                reg.type.to_llvm_ir() + '*', pname,
+            )
+            return reg
+
     def const_ptr(self, value):
         with self.current.llvm.commented_block('ptr ' + value):
             ptr = self.const(self.type('%ptr'), value)
+            reg = self.current.llvm.load(
+                ptr.type.to_llvm_ir(),
+                ptr.type.to_llvm_ir() + '*',
+                ptr.name
+            )
+            return Variable(name=reg, type=ptr.type)
+
+    def const_bool(self, value):
+        with self.current.llvm.commented_block('bool {}'.format(value)):
+            ptr = self.const(self.type('%bool'), value)
+            reg = self.current.llvm.load(
+                ptr.type.to_llvm_ir(),
+                ptr.type.to_llvm_ir() + '*',
+                ptr.name
+            )
+            return Variable(name=reg, type=ptr.type)
+
+    def const_i32(self, value):
+        with self.current.llvm.commented_block('i32 {}'.format(value)):
+            ptr = self.const(self.type('%i32'), value)
+            reg = self.current.llvm.load(
+                ptr.type.to_llvm_ir(),
+                ptr.type.to_llvm_ir() + '*',
+                ptr.name
+            )
+            return Variable(name=reg, type=ptr.type)
+
+    def const_f32(self, value):
+        with self.current.llvm.commented_block('f32 {}'.format(value)):
+            value = struct.unpack('@Q', struct.pack('@d', float(value)))[0]
+            value = '0x{:X}'.format(value & 0xFFFF_FFFF_E000_0000)
+
+            ptr = self.const(self.type('%f32'), value)
             reg = self.current.llvm.load(
                 ptr.type.to_llvm_ir(),
                 ptr.type.to_llvm_ir() + '*',
@@ -318,31 +495,9 @@ class Module:
             )
             return Variable(name=reg, type=self.type('%cstr'))
 
-    def const_f32(self, value):
-        with self.current.llvm.commented_block('f32 {}'.format(value)):
-            value = struct.unpack('@Q', struct.pack('@d', float(value)))[0]
-            value = '0x{:X}'.format(value & 0xFFFF_FFFF_E000_0000)
-
-            ptr = self.const(self.type('%f32'), value)
-            reg = self.current.llvm.load(
-                ptr.type.to_llvm_ir(),
-                ptr.type.to_llvm_ir() + '*',
-                ptr.name
-            )
-            return Variable(name=reg, type=ptr.type)
-
-    def const_i32(self, value):
-        with self.current.llvm.commented_block('i32 {}'.format(value)):
-            ptr = self.const(self.type('%i32'), value)
-            reg = self.current.llvm.load(
-                ptr.type.to_llvm_ir(),
-                ptr.type.to_llvm_ir() + '*',
-                ptr.name
-            )
-            return Variable(name=reg, type=ptr.type)
-
     def mangle_name(self, fname, ltype, rtype):
-        fname = fname.replace('"', '\\"').replace('%', '').replace('@', '')
+        if len(fname) > 1:
+            fname = fname.replace('"', '\\"').replace('%', '').replace('@', '')
         ltype = ltype.replace('"', '\\"').replace('%', '').replace('@', '')
         rtype = rtype.replace('"', '\\"').replace('%', '').replace('@', '')
         return '@"{};{};{}"'.format(ltype, fname, rtype)
@@ -366,12 +521,104 @@ class Module:
         try:
             func = self.functions[call_name]
         except:
-            return
-            raise Exception('Unknown operation: {}'.format(call_name))
+            raise ProgramUnknownOperationError('Unknown operation: {}'.format(call_name))
 
         with self.current.llvm.commented_block(call_name):
-            ret_reg = self.current.llvm.call(func.rtype.to_llvm_ir(), call_name, *args)
-            return ret_reg
+            reg = self.current.llvm.call(func.rtype.to_llvm_ir(), call_name, *args)
+            return Variable(name=reg, type=func.rtype)
+
+    def ret(self, reg):
+        if reg.type.name == '%void':
+            self.current.rtype = reg.type
+            self.current.llvm.ret(reg.type.to_llvm_ir())
+        else:
+            self.current.rtype = reg.type
+            self.current.llvm.ret(reg.type.to_llvm_ir(), reg.name)
+
+    def function(self, name):
+        class Fn:
+            def __init__(self, module, name):
+                self.module = module
+                self.name   = name
+
+                self.function = Function(
+                    name = name,
+                    args = {},
+                    rtype = module.type('%void'),
+                )
+
+            def __enter__(self):
+                self.previous       = self.module.current
+                self.module.current = self.function
+                return self
+
+            def __exit__(self, *_):
+                try:
+                    left = self.function.args['%left']
+                except KeyError: 
+                    left = Variable(type=self.module.type('%void'))
+
+                try:
+                    right = self.function.args['%right']
+                except KeyError: 
+                    right = Variable(type=self.module.type('%void'))
+
+                self.function.name = self.module.mangle_name(
+                    self.name, left.type.name, right.type.name
+                )
+    
+                self.module.functions[self.function.name] = self.function
+                self.module.current = self.previous
+
+        return Fn(self, name)
+
+    def if_then(self, cond):
+        class IfThen:
+            def __init__(self, llvm, cond):
+                self.llvm = llvm
+                self.cond = cond
+                self.tlbl = llvm.next_lbl()
+                self.flbl = llvm.next_lbl()
+
+            def __enter__(self):
+                self.llvm.comment('if')
+                self.llvm.br_if_else(self.cond.name, self.tlbl, self.flbl)
+                self.llvm.label(self.tlbl)
+                return self
+
+            def __exit__(self, *_):
+                self.llvm.br(self.flbl)
+                self.llvm.label(self.flbl)
+                self.llvm.line('')
+
+        return IfThen(self.current.llvm, cond)
+
+    def loop(self):
+        class Loop:
+            def __init__(self, llvm):
+                self.llvm = llvm
+                self.slbl = llvm.next_lbl()
+                self.elbl = llvm.next_lbl()
+
+            def __enter__(self):
+                self.llvm.comment('repeat')
+                self.llvm.br(self.slbl)
+                self.llvm.label(self.slbl)
+                return self
+
+            def __exit__(self, *_):
+                self.llvm.br(self.slbl)
+                self.llvm.label(self.elbl)
+                self.llvm.line('')
+
+            def end(self):
+                self.llvm.br(self.elbl)
+
+        return Loop(self.current.llvm)
+
+    def negate(self, value):
+        reg = self.current.llvm.icmp('eq', 'i1', value.name, '0')
+        return Variable(name=reg, type=self.type('%bool'))
 
     def to_llvm_ir(self):
         with self.llvm.commented_block('Declared types:'):
@@ -393,123 +640,10 @@ class Module:
                 for _, arg in fn.args.items():
                     args.append(arg.type.to_llvm_ir())
                     args.append(arg.name)
-                with self.llvm.define(fn.name, fn.rtype.to_llvm_ir(), *args):
+                with self.llvm.define(fn.internal, fn.name, fn.rtype.to_llvm_ir(), *args):
                     self.llvm.code += fn.llvm.code
                 self.llvm.line('')
 
         return self.llvm.code
-
-
-"""
-    def new_register(self):
-        register = '%r' + str(self.reg_count)
-        self.reg_count += 1
-        return register
-
-    def last_register(self):
-        return '%r' + str(self.reg_count - 1)
-
-    def new_type(self):
-        type_name = '%t' + str(self.type_count)
-        self.type_count += 1
-        return type_name
-
-    def new_label(self):
-        label_name = 'lbl' + str(self.label_count)
-        self.label_count += 1
-        return label_name
-
-    def declare_variable(self, vtype, vname):
-        vptr = self.alloca(vtype)
-        self.scope[self.current_scope][vname] = (vtype, vptr)
-        return vptr
-
-    def type(self, declaration):
-        try:
-            type_reg = self.declared[hash(declaration)]
-        except:
-            type_reg      = self.new_type()
-            self.globals += '{} = type {}\n'.format(type_reg, declaration)
-            self.declared[hash(declaration)] = type_reg
-        return type_reg
-
-
-    def store(self, value_type, value, store_type, store_reg):
-        self.code += self.instr('store {} {}, {} {}', value_type, value, store_type, store_reg)
-
-
-    def alloca(self, mem_type):
-        ptr = self.new_register()
-        self.code += self.instr('{} = alloca {}', ptr, mem_type)
-        return ptr
-
-
-    def get_element_ptr(self, mem_type, reg_type, reg_name, *args):
-        ptr   = self.new_register()
-        instr = '{} = getelementptr {}, {} {}'.format(ptr, mem_type, reg_type, reg_name)
-
-        it = iter(args)
-        for arg_type, arg_value in zip(it, it):
-            instr += ', {} {}'.format(arg_type, arg_value)
-
-        self.code += self.instr(instr)
-        return ptr
-
-
-
-
-    def add(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = add {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def fadd(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = fadd {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def sub(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = sub {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def fsub(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = fsub {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def mul(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = mul {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def fmul(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = fmul {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def sdiv(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = sdiv {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def fdiv(self, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = fdiv {} {}, {}', reg, reg_type, a_reg, b_reg)
-        return reg
-
-
-    def icmp(self, cmp_type, reg_type, a_reg, b_reg):
-        reg = self.new_register()
-        self.code += self.instr('{} = icmp {} {} {}, {}', reg, cmp_type, reg_type, a_reg, b_reg)
-        return reg
-"""
 
 
