@@ -12,7 +12,9 @@ def run_test(test_name, max_file_name, output=False):
         args = ''
     
     try:
-        process_out = subprocess.check_output('python3 infix.py tests/{}.ifx 2> /dev/null | lli-9 {} 2> /dev/null'.format(test_name, args.strip()), stderr=None, shell=True)
+        if os.path.exists('tests/{}.in'.format(test_name)):
+            args += ' < tests/{}.in'.format(test_name)
+        process_out = subprocess.check_output('./infix.py tests/{}.ifx {}'.format(test_name, args.strip()), stderr=None, shell=True)
         process_out = process_out.decode('UTF-8')
     except Exception as e:
         if output:

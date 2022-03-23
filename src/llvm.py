@@ -1,7 +1,9 @@
 from __future__  import annotations
-from dataclasses import dataclass
 
 import struct
+
+from dataclasses import dataclass
+from inspect     import getmembers, isfunction
 
 class LLVMError(Exception):
     pass
@@ -10,12 +12,13 @@ class LLVMTypeError(Exception):
     pass
 
 class CommentContext:
-    def __init__(self, llvm, comment):
+    def __init__(self, llvm, comment, *args):
         self.llvm    = llvm
         self.comment = comment
+        self.args    = args
 
     def __enter__(self):
-        self.llvm.comment(self.comment)
+        self.llvm.comment(self.comment, *self.args)
 
     def __exit__(self, *exception):
         self.llvm.line('')
@@ -42,10 +45,6 @@ class DefineContext:
         self.llvm.line('{')
 
     def __exit__(self, *exception):
-        if self.name == '@main':
-            self.llvm.ret('i32', '0')
-        if self.rtype == 'void':
-            self.llvm.ret('void')
         self.llvm.line('}')
 
 class LLVM:
@@ -60,11 +59,11 @@ class LLVM:
         else:
             self.code += line + '\n'
 
-    def comment(self, comment):
-        self.line('; ' + comment)
+    def comment(self, comment, *args):
+        self.line('; ' + comment, *args)
 
-    def commented_block(self, comment):
-        return CommentContext(self, comment)
+    def commented_block(self, comment, *args):
+        return CommentContext(self, comment, *args)
 
     def next_lbl(self):
         self.last_lbl += 1
@@ -102,6 +101,18 @@ class LLVM:
         self.instr('{} = alloca {}', reg, type)
         return reg
 
+    def malloc(self, type, elems=None):
+        reg = self.next_reg()
+        if elems is None:
+            self.instr('{} = malloc {}', reg, type)
+        else:
+            self.instr('{} = malloc {}, i64 {}', reg, type, elems)
+        return reg
+
+    def free(self, type, reg):
+        self.instr('free {} {}', type, reg)
+        return reg
+
     def get_element_ptr(self, rtype, ptype, pname, *args):
         reg   = self.next_reg()
         instr = '{} = getelementptr {}, {} {}' + ', {} {}' * (len(args) // 2)
@@ -116,9 +127,9 @@ class LLVM:
     def store(self, rtype, rname, ptype, pname):
         self.instr('store {} {}, {} {}', rtype, rname, ptype, pname)
 
-    def fpext(self, f32_reg):
+    def fpext(self, from_type, to_type, value):
         reg = self.next_reg()
-        self.instr('{} = fpext float {} to double', reg, f32_reg)
+        self.instr('{} = fpext {} {} to {}', reg, from_type, value, to_type)
         return reg
 
     def call(self, ftype, fname, *args):
@@ -214,6 +225,13 @@ class Type:
         if self.name[0] != '%':
             raise LLVMTypeError('Type names MUST start with %')
 
+    def ptr(self):
+        return Type(
+            self.name + '.ptr',
+            self.repr + '*',
+            primitive=True
+        )
+
     def to_llvm_ir(self):
         if self.primitive:
             return self.repr
@@ -257,6 +275,7 @@ class Function:
     rtype:     Type           = None
     variables: Dict[Variable] = None
     internal:  bool           = False
+    used:      bool           = False
 
     def __post_init__(self):
         if self.name[0] != '@':
@@ -279,10 +298,21 @@ class Function:
 
 
 @dataclass
+class External:
+    name:  str
+    rtype: Type
+    args:  List[Type] = None
+
+    def __post_init__(self):
+        if self.args is None:
+            self.args = []
+
+@dataclass
 class Module:
     llvm:      LLVM           = None
     types:     Dict[Type]     = None
     variables: Dict[Variable] = None
+    externals: Dict[External] = None
     functions: Dict[Function] = None
 
     current = None
@@ -291,6 +321,7 @@ class Module:
         if self.llvm      is None: self.llvm      = LLVM()
         if self.types     is None: self.types     = {}
         if self.variables is None: self.variables = {}
+        if self.externals is None: self.externals = {}
         if self.functions is None: self.functions = {}
 
         self.last_const_reg = 0
@@ -312,17 +343,19 @@ class Module:
         self.new_type('%f32',  'float',  primitive=True)
         self.new_type('%f64',  'double', primitive=True)
         self.new_type('%f128', 'fp128',  primitive=True)
+        self.new_type('%vararg', '...',  primitive=True) # vararg for externs
         self.new_type('%cstr',     'i8*')
         self.new_type('%cstr.ptr', 'i8**')
+        self.new_type('%list.i8',  '{ i64, i8* }')
+        self.new_type('%list.i32',  '{ i64, i8* }')
 
     def default_variables(self):
         self.const_cstr('%s\n')
 
     def default_operations(self):
-        import builtin
-        from inspect import getmembers, isfunction
+        import src.builtin # to avoid circular import
 
-        for name, fn in getmembers(builtin, isfunction):
+        for name, fn in getmembers(src.builtin, isfunction):
             if name[0] == '_':
                 continue
             fn_def = fn(self)
@@ -335,6 +368,7 @@ class Module:
                 '%argv' : Variable(name='%argv', type=self.type('%cstr.ptr')),
             },
             rtype = self.type('%i32'),
+            used  = True,
         )
 
         self.current = self.functions['@main']
@@ -368,7 +402,7 @@ class Module:
             raise ProgramError('Undeclared variable: ' + name)
 
     def new_variable(self, name, type):
-        with self.current.llvm.commented_block('new ' + name):
+        with self.current.llvm.commented_block('new {}', name):
             if name in self.current.args or name in self.current.variables:
                 raise ProgramTypeError('Duplicated variable: ' + name)
 
@@ -380,8 +414,17 @@ class Module:
             self.current.variables[name] = Variable(name=reg, type=type)
             return self.current.variables[name]
     
+    def ptr_to(self, name):
+        with self.current.llvm.commented_block('ptr-to {}', name):
+            # Try to find a local-scope variable
+            try:                            
+                reg = self.current.variables[name]
+                return Variable(reg.name, reg.type.ptr())
+            except KeyError:
+                raise
+
     def variable(self, name):
-        with self.current.llvm.commented_block('variable '+name):
+        with self.current.llvm.commented_block('variable {}', name):
             # Try to find a local-scope variable
             try:                            
                 ptr = self.current.variables[name]
@@ -403,6 +446,44 @@ class Module:
             # Finally, try a global-scope variable or fail
             return self.global_var(name)
 
+    def add_external(self, name, rtype, args):
+        if name in self.externals:
+            return
+        self.externals[name] = External(
+            name  = name,
+            rtype = self.type(rtype),
+            args  = [ self.type(arg) for arg in args ]
+        )
+
+    def call_external(self, name, args):
+        if name not in self.externals:
+            raise ProgramUnknownOperationError('Unknown external')
+
+        a = []
+        for arg in args:
+            a.append(arg.type.to_llvm_ir())
+            a.append(arg.name)
+        
+        external = self.externals[name]
+        extype   = external.rtype.to_llvm_ir()
+
+        if any(arg.name == '%vararg' for arg in external.args):
+            extype += '(' + ', '.join(arg.to_llvm_ir() for arg in external.args) + ')'
+
+        ret = self.current.llvm.call(extype, name, *a)
+        return Variable(ret, external.rtype)
+
+    def cast(self, name, type):
+        var   = self.variable(name)
+        tfrom = var.type
+        tto   = self.type('%f64')
+        with self.current.llvm.commented_block('cast {} to {}'.format(tfrom.name, tto.name)):
+            if var.type.name[1] == 'f':
+                ret = self.current.llvm.fpext(tfrom.to_llvm_ir(), tto.to_llvm_ir(), var.name)
+                return Variable(ret, tto)
+        raise Exception('Unsupported cast {} to {}'.format(tfrom.name, tto.name))
+
+
     def const(self, type, value):
         index = type.name + ';' + value
 
@@ -419,7 +500,7 @@ class Module:
             return self.const_regs[index]
 
     def deref_ptr(self, ptr):
-        with self.current.llvm.commented_block('deref ' + ptr.name):
+        with self.current.llvm.commented_block('deref {}', ptr.name):
             reg = self.current.llvm.load(
                 ptr.type.to_llvm_ir(),
                 ptr.type.to_llvm_ir() + '*',
@@ -428,7 +509,7 @@ class Module:
             return Variable(name=reg, type=ptr.type)
 
     def assign(self, pname, reg):
-        with self.current.llvm.commented_block('{} = {}'.format(pname, reg)):
+        with self.current.llvm.commented_block('{} = {}', pname, reg):
             self.current.llvm.store(
                 reg.type.to_llvm_ir(),       reg.name,
                 reg.type.to_llvm_ir() + '*', pname,
@@ -436,7 +517,7 @@ class Module:
             return reg
 
     def const_ptr(self, value):
-        with self.current.llvm.commented_block('ptr ' + value):
+        with self.current.llvm.commented_block('ptr {}', value):
             ptr = self.const(self.type('%ptr'), value)
             reg = self.current.llvm.load(
                 ptr.type.to_llvm_ir(),
@@ -446,7 +527,7 @@ class Module:
             return Variable(name=reg, type=ptr.type)
 
     def const_bool(self, value):
-        with self.current.llvm.commented_block('bool {}'.format(value)):
+        with self.current.llvm.commented_block('bool {}', value):
             ptr = self.const(self.type('%bool'), value)
             reg = self.current.llvm.load(
                 ptr.type.to_llvm_ir(),
@@ -456,7 +537,7 @@ class Module:
             return Variable(name=reg, type=ptr.type)
 
     def const_i32(self, value):
-        with self.current.llvm.commented_block('i32 {}'.format(value)):
+        with self.current.llvm.commented_block('i32 {}', value):
             ptr = self.const(self.type('%i32'), value)
             reg = self.current.llvm.load(
                 ptr.type.to_llvm_ir(),
@@ -466,7 +547,7 @@ class Module:
             return Variable(name=reg, type=ptr.type)
 
     def const_f32(self, value):
-        with self.current.llvm.commented_block('f32 {}'.format(value)):
+        with self.current.llvm.commented_block('f32 {}', value):
             value = struct.unpack('@Q', struct.pack('@d', float(value)))[0]
             value = '0x{:X}'.format(value & 0xFFFF_FFFF_E000_0000)
 
@@ -482,7 +563,7 @@ class Module:
         size  = len(value) + 1 # + \0
         value = value.replace('\n', '\\0A')
 
-        with self.current.llvm.commented_block('string "{}"'.format(value)):
+        with self.current.llvm.commented_block('string "{}"', value):
             tname = '%cstr.{}'.format(size)
             stype = self.type(tname, '[ {} x i8 ]'.format(size))
 
@@ -494,6 +575,20 @@ class Module:
                 'i64', 0, 'i64', 0
             )
             return Variable(name=reg, type=self.type('%cstr'))
+
+    def new_list(self, values):
+        type = values[0].type if len(values) > 0 else self.type('%i8')
+
+        with self.current.llvm.commented_block('list of {} {}s', len(values), type.name):
+            tname = '%list.{}'.format(type.name.replace('%', ''))
+            stype = self.type(tname, '[ i64, i64, {}* ]'.format(type.to_llvm_ir()))
+
+            lst = self.const(stype, '[ i64 {len}, i64 {len}, {type}* null ]'.format(len=len(values), type=type.to_llvm_ir()))
+            ptr = self.current.llvm.malloc(type.to_llvm_ir, len(values))
+            return lst
+
+    def new_struct(self, value):
+        return Variable(type=self.type('%void'))
 
     def mangle_name(self, fname, ltype, rtype):
         if len(fname) > 1:
@@ -520,6 +615,7 @@ class Module:
 
         try:
             func = self.functions[call_name]
+            func.used = True
         except:
             raise ProgramUnknownOperationError('Unknown operation: {}'.format(call_name))
 
@@ -632,16 +728,23 @@ class Module:
                 self.llvm.global_variable(vr.name, vr.type.to_llvm_ir(), vr.value)
 
         with self.llvm.commented_block('Externals'):
-            self.llvm.declare('@printf', 'i32', 'i8*', '...')
+            for _, ex in self.externals.items():
+                self.llvm.declare(ex.name, ex.rtype.to_llvm_ir(), *[
+                    arg.to_llvm_ir() for arg in ex.args
+                ])
 
         with self.llvm.commented_block('Functions:'):
             for _, fn in self.functions.items():
+                if not fn.used:
+                    continue
                 args = []
                 for _, arg in fn.args.items():
                     args.append(arg.type.to_llvm_ir())
                     args.append(arg.name)
                 with self.llvm.define(fn.internal, fn.name, fn.rtype.to_llvm_ir(), *args):
                     self.llvm.code += fn.llvm.code
+                    if fn.name == '@main':
+                        self.llvm.ret(self.type('%i32').to_llvm_ir(), '0')
                 self.llvm.line('')
 
         return self.llvm.code

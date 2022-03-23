@@ -1,6 +1,6 @@
 add is {
-    left   is i32;
-    right  is i32;
+    left  is i32;
+    right is i32;
 
     left + right
 };
@@ -20,7 +20,7 @@ mul is {
         index  = index + 1;
     };
 
-    void return result;
+    void return result
 };
 
 void println 3 mul 2;

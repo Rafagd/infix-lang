@@ -1,6 +1,6 @@
-scanf extern ("i32", "i8*", "...");
+scanf extern (i32, ptr, vararg);
 
 input is i32;
-scanf call ("%d", input);
+scanf called (" %d", [void ptr-to input]);
 
 void println input;

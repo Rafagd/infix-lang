@@ -1,0 +1,211 @@
+# Standard Library
+
+printf extern (i32, ptr, vararg);
+
+printf is {
+    left  is cstr;
+    right is ptr;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is bool;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is i8;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is i16;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is i32;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is i64;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is f16;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is f32;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is f64;
+
+    printf called (left, right)
+};
+
+printf is {
+    left  is cstr;
+    right is cstr;
+
+    printf called (left, right)
+};
+
+# prints cannot depend on each other
+# printlns can depend on prints of the same type
+
+print is {
+    "%s" printf "void";
+    void return void;
+};
+
+println is {
+    "%s\n" printf "void";
+    void return void;
+};
+
+print is {
+    right is ptr;
+    ((right == null) ? "%s"   printf "null")
+                     ? "0X08" printf right;
+    void return void;
+};
+
+println is {
+    right is ptr;
+    void print right;
+    "\n" printf "";
+    void return void;
+};
+
+print is {
+    right is bool;
+    (right ? "%s" printf "true")
+           ? "%s" printf "false";
+    void return void;
+};
+
+println is {
+    right is bool;
+    void print right;
+    "\n" printf "";
+    void return void;
+};
+
+print is {
+    right is i8;
+    "%hhd" printf right;
+    void return void;
+};
+
+println is {
+    right is i8;
+    "%hhd\n" printf right;
+    void return void;
+};
+
+print is {
+    right is i16;
+    "%hd" printf right;
+    void return void;
+};
+
+println is {
+    right is i16;
+    "%hd\n" printf right;
+    void return void;
+};
+
+print is {
+    right is i32;
+    "%d" printf right;
+    void return void;
+};
+
+println is {
+    right is i32;
+    "%d\n" printf right;
+    void return void;
+};
+
+print is {
+    right is i64;
+    "%lld" printf right;
+    void return void;
+};
+
+println is {
+    right is i64;
+    "%lld\n" printf right;
+    void return void;
+};
+
+print is {
+    right is f16;
+    "%f" printf right as f64;
+    void return void;
+};
+
+println is {
+    right is f16;
+    "%f\n" printf right as f64;
+    void return void;
+};
+
+print is {
+    right is f32;
+    "%f" printf right as f64;
+    void return void;
+};
+
+println is {
+    right is f32;
+    "%f\n" printf right as f64;
+    void return void;
+};
+
+print is {
+    right is f64;
+    "%lf" printf right;
+    void return void;
+};
+
+println is {
+    right is f64;
+    "%lf\n" printf right;
+    void return void;
+};
+
+print is {
+    right is cstr;
+    "%s" printf right;
+    void return void;
+};
+
+println is {
+    right is cstr;
+    "%s\n" printf right;
+    void return void;
+};
+

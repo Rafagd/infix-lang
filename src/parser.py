@@ -1,10 +1,12 @@
 from __future__  import annotations
 
+import pprint
+
 from dataclasses import dataclass
 from enum        import Enum, auto
 from copy        import copy
 
-from tokenizer   import TokenType, Token
+from src.tokenizer   import TokenType, Token
 
 class ExprType(Enum):
     INVALID = auto()
@@ -41,6 +43,9 @@ class Node:
     def __post_init__(self):
         if self.sub_types is None:
             self.sub_types = []
+
+        if not isinstance(self.token, Token):
+            raise Exception('Not a token')
 
         if self.token is None:
             self.token = Token()
@@ -122,8 +127,15 @@ class Parser:
                 if isinstance(left, Token):
                     left = Node(token=left)
 
+                if not isinstance(op, Token):
+                    raise Exception('Only identifiers are allowed as operations. Missing ;?')
+
                 expr.append(Node(token=op, children=[ left, right ]))
-            node = expr[0]
+
+            if len(expr) != 0:
+                node = expr[0]
+            else:
+                node = Node(token=Token(value='void', kind=TokenType.VOID))
 
         return node
 

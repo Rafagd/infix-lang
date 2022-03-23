@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from util import can_convert_to
+from src.util import can_convert_to
 
 class TokenType(Enum):
     UNKNOWN    = auto()
@@ -20,6 +20,12 @@ class Token:
     value: str       = ''
     row:   int       = 0
     col:   int       = 0
+
+    def __str__(self):
+        return repr(self)
+
+    def __repr__(self):
+        return '{}:{}[{}:{}]'.format(self.value, self.kind.name, self.row, self.col)
 
 class Tokenizer:
     def __init__(self, source):
