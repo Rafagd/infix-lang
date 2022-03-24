@@ -73,7 +73,8 @@ if __name__ == '__main__':
     if option == '--asm':
         process = [ 'llc-9' ]
     else:
-        process = [ 'llc-9', '-filetype=obj', '-o', fpath.replace('.ifx', '.o') ]
+        oname   = 'obj/' + fpath.split('/')[-1].replace('.ifx', '.o')
+        process = [ 'llc-9', '-filetype=obj', '-o', oname ]
 
     with Popen(process, stdin=PIPE, stdout=PIPE) as llc:
         out, err = llc.communicate(bytes(ir_repr, 'utf-8'))
@@ -85,7 +86,9 @@ if __name__ == '__main__':
         print(str(out, 'utf-8'))
         sys.exit(0)
 
-    with Popen(['clang', fpath.replace('.ifx', '.o'), '-o', fpath.replace('.ifx', '') ], stdin=PIPE, stdout=PIPE) as clang:
+    bname = 'bin/' + fpath.split('/')[-1].replace('.ifx', '')
+
+    with Popen(['clang', oname, '-o', bname ], stdin=PIPE, stdout=PIPE) as clang:
         out, err = clang.communicate(out)
         if err is not None:
             print(str(err, 'utf-8'))
@@ -94,6 +97,6 @@ if __name__ == '__main__':
     if option == '--build-only':
         sys.exit(0)
 
-    os.system(fpath.replace('.ifx', '') + ' ' + ' '.join(args))
+    os.system(bname + ' ' + ' '.join(args))
     
 
